@@ -18,43 +18,35 @@
 // 10. Same faculty for all sessions of a course
 // 11. Different-day preference
 //
-// Gemini can be used as the AI layer.
-// This scheduler is the deterministic fallback.
+// This deterministic solver is kept as the academic
+// baseline the genetic algorithm is compared against.
 // =======================================================
 
 
 // -------------------------------------------------------
-// 1. BASIC HELPERS
+// SHARED CONSTRAINT HELPERS
+//
+// Specialization, availability, room and student-group rules
+// live in schedulingHelpers.js so that this scheduler, the
+// genetic scheduler and the validator all judge a timetable
+// by exactly the same standard.
 // -------------------------------------------------------
 
-function normalizeText(value) {
-    return String(value || "")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim();
-}
+import {
+    getWeeklySessions as defaultGetWeeklySessions,
+    isWithinAvailability,
+    specializationMatches,
+    roomTypeMatches,
+    roomCapacityMatches,
+    courseGroupKey,
+} from "./schedulingHelpers.js";
 
 
-function timeToMinutes(time) {
-    if (!time || typeof time !== "string") {
-        return NaN;
-    }
-
-    const [hours, minutes] =
-        time.split(":").map(Number);
-
-    if (
-        Number.isNaN(hours) ||
-        Number.isNaN(minutes)
-    ) {
-        return NaN;
-    }
-
-    return hours * 60 + minutes;
-}
-
-
+/**
+ * Split a slot ("09:00-10:00" or {start, end}) into start/end times.
+ */
 function slotToParts(slot) {
+
     if (
         slot &&
         typeof slot === "object"
@@ -76,6 +68,9 @@ function slotToParts(slot) {
 }
 
 
+/**
+ * Key identifying one cell of the timetable grid.
+ */
 function createSlotKey(
     day,
     startTime,
@@ -85,337 +80,17 @@ function createSlotKey(
 }
 
 
-// -------------------------------------------------------
-// 2. SPECIALIZATION MATCHING
-// -------------------------------------------------------
-
-function specializationMatches(
-    course,
-    faculty
-) {
-    const specializations =
-        Array.isArray(
-            faculty.specialization
-        )
-            ? faculty.specialization
-            : [];
-
-    if (
-        specializations.length === 0
-    ) {
-        return false;
-    }
-
-    const courseText =
-        normalizeText(
-            `${course.name || ""} ${
-                course.code || ""
-            } ${
-                course.description || ""
-            }`
-        );
-
-    if (!courseText) {
-        return false;
-    }
-
-    const genericWords =
-        new Set([
-            "programming",
-            "systems",
-            "system",
-            "management",
-            "design",
-            "development",
-            "technology",
-            "technologies",
-            "engineering",
-            "science",
-            "computer",
-            "data",
-            "applications",
-            "laboratory",
-            "lab",
-        ]);
-
-    const courseWords =
-        new Set(
-            courseText
-                .split(" ")
-                .filter(
-                    (word) =>
-                        word.length >= 3 &&
-                        !genericWords.has(word)
-                )
-        );
-
-    return specializations.some(
-        (specialization) => {
-
-            const specializationText =
-                normalizeText(
-                    specialization
-                );
-
-            if (
-                !specializationText
-            ) {
-                return false;
-            }
-
-            // Exact phrase
-            if (
-                courseText.includes(
-                    specializationText
-                ) ||
-                specializationText.includes(
-                    courseText
-                )
-            ) {
-                return true;
-            }
-
-            const specializationWords =
-                specializationText
-                    .split(" ")
-                    .filter(
-                        (word) =>
-                            word.length >= 3 &&
-                            !genericWords.has(word)
-                    );
-
-            return specializationWords.some(
-                (word) =>
-                    courseWords.has(word)
-            );
-        }
-    );
-}
-
-
-// -------------------------------------------------------
-// 3. FACULTY AVAILABILITY
-// -------------------------------------------------------
-
-function isWithinAvailability(
-    faculty,
-    day,
-    startTime,
-    endTime
-) {
-    const dayKey =
-        String(day).toLowerCase();
-
-    const availability =
-        faculty.availability?.[
-            dayKey
-        ] || [];
-
-    if (
-        !Array.isArray(
-            availability
-        )
-    ) {
-        return false;
-    }
-
-    const start =
-        timeToMinutes(startTime);
-
-    const end =
-        timeToMinutes(endTime);
-
-    if (
-        Number.isNaN(start) ||
-        Number.isNaN(end)
-    ) {
-        return false;
-    }
-
-    return availability.some(
-        (slot) => {
-
-            const availableStart =
-                timeToMinutes(
-                    slot.start
-                );
-
-            const availableEnd =
-                timeToMinutes(
-                    slot.end
-                );
-
-            return (
-                start >=
-                    availableStart &&
-                end <=
-                    availableEnd
-            );
-        }
-    );
-}
-
-
-// -------------------------------------------------------
-// 4. ROOM AVAILABILITY
-// -------------------------------------------------------
-
-function isRoomAvailable(
-    room,
-    day,
-    startTime,
-    endTime
-) {
-    const dayKey =
-        String(day).toLowerCase();
-
-    const availability =
-        room.availability?.[
-            dayKey
-        ] || [];
-
-    if (
-        !Array.isArray(
-            availability
-        )
-    ) {
-        return false;
-    }
-
-    const start =
-        timeToMinutes(startTime);
-
-    const end =
-        timeToMinutes(endTime);
-
-    if (
-        Number.isNaN(start) ||
-        Number.isNaN(end)
-    ) {
-        return false;
-    }
-
-    return availability.some(
-        (slot) => {
-
-            const availableStart =
-                timeToMinutes(
-                    slot.start
-                );
-
-            const availableEnd =
-                timeToMinutes(
-                    slot.end
-                );
-
-            return (
-                start >=
-                    availableStart &&
-                end <=
-                    availableEnd
-            );
-        }
-    );
-}
-
-
-// -------------------------------------------------------
-// 5. ROOM TYPE
-// -------------------------------------------------------
-
-function roomTypeMatches(
-    course,
-    room
-) {
-    const courseType =
-        String(
-            course.type ||
-                "lecture"
-        ).toLowerCase();
-
-    const roomType =
-        String(
-            room.type || ""
-        ).toLowerCase();
-
-    if (
-        courseType === "lab"
-    ) {
-        return (
-            roomType === "lab"
-        );
-    }
-
-    if (
-        courseType === "seminar"
-    ) {
-        return (
-            roomType ===
-                "seminar_room" ||
-            roomType ===
-                "auditorium"
-        );
-    }
-
-    return (
-        roomType ===
-            "lecture_hall" ||
-        roomType ===
-            "seminar_room" ||
-        roomType ===
-            "auditorium"
-    );
-}
-
-
-// -------------------------------------------------------
-// 6. ROOM CAPACITY
-// -------------------------------------------------------
-
-function roomCapacityMatches(
-    course,
-    room
-) {
-    const requiredCapacity =
-        Number(
-            course.studentCount ??
-            course.enrollment ??
-            course.strength ??
-            course.capacity ??
-            1
-        );
-
-    const roomCapacity =
-        Number(
-            room.capacity
-        );
-
-    if (
-        !Number.isFinite(
-            roomCapacity
-        )
-    ) {
-        return false;
-    }
-
-    return (
-        roomCapacity >=
-        requiredCapacity
-    );
-}
-
-
-// -------------------------------------------------------
-// 7. FACULTY PREFERENCE
-// -------------------------------------------------------
-
+/**
+ * Soft score for placing a faculty member in a slot label:
+ * rewards a preferred slot, punishes an avoided one.
+ */
 function getFacultyPreferenceScore(
     faculty,
     slot
 ) {
+
     const preferences =
-        faculty.preferences ||
-        {};
+        faculty.preferences || {};
 
     const preferred =
         Array.isArray(
@@ -433,109 +108,13 @@ function getFacultyPreferenceScore(
 
     let score = 0;
 
-    if (
-        preferred.includes(slot)
-    ) {
+    if (preferred.includes(slot)) {
         score += 20;
     }
 
-    if (
-        avoid.includes(slot)
-    ) {
+    if (avoid.includes(slot)) {
         score -= 30;
     }
-
-    return score;
-}
-
-
-// -------------------------------------------------------
-// 8. WEEKLY SESSION COUNT
-// -------------------------------------------------------
-
-function defaultGetWeeklySessions(
-    course
-) {
-    const hours =
-        Number(
-            course.hoursPerWeek
-        );
-
-    if (
-        Number.isFinite(hours) &&
-        hours > 0
-    ) {
-        return Math.ceil(hours);
-    }
-
-    const credits =
-        Number(
-            course.credits
-        );
-
-    if (
-        Number.isFinite(credits) &&
-        credits > 0
-    ) {
-        return Math.ceil(
-            credits
-        );
-    }
-
-    return 1;
-}
-
-
-// -------------------------------------------------------
-// 9. STUDENT GROUP
-// -------------------------------------------------------
-
-function courseGroupKey(
-    course
-) {
-    return [
-        course.department,
-        course.semester,
-        course.year,
-    ]
-        .map(normalizeText)
-        .join("|");
-}
-
-
-// -------------------------------------------------------
-// 10. FACULTY SCORING
-// -------------------------------------------------------
-
-function facultyScore(
-    course,
-    faculty,
-    facultyHours
-) {
-    let score = 0;
-
-    if (
-        specializationMatches(
-            course,
-            faculty
-        )
-    ) {
-        score += 1000;
-    }
-
-    score +=
-        getFacultyPreferenceScore(
-            faculty,
-            ""
-        );
-
-    const currentHours =
-        facultyHours.get(
-            String(faculty._id)
-        ) || 0;
-
-    score -=
-        currentHours * 5;
 
     return score;
 }
@@ -798,7 +377,7 @@ export function generateLocalTimetable({
                                     (room) => {
 
                                         if (
-                                            !isRoomAvailable(
+                                            !isWithinAvailability(
                                                 room,
                                                 day,
                                                 slot.startTime,
@@ -1086,9 +665,6 @@ export function generateLocalTimetable({
         const usedCourseSlots =
             new Set();
 
-        const usedDays =
-            new Set();
-
 
         function search(
             optionStartIndex
@@ -1227,41 +803,12 @@ export function generateLocalTimetable({
                 }
 
 
-                // ---------------------------------------
-                // Prefer different days
-                //
-                // This is a preference, NOT a hard
-                // constraint.
-                // ---------------------------------------
-
-                let dayPenalty = 0;
-
-                if (
-                    usedDays.has(
-                        option.day
-                    )
-                ) {
-                    dayPenalty = 20;
-                }
-
-
-                // Add temporary score
-
-                option._searchScore =
-                    option.score -
-                    dayPenalty;
-
-
                 selected.push(
                     option
                 );
 
                 usedCourseSlots.add(
                     slotKey
-                );
-
-                usedDays.add(
-                    option.day
                 );
 
                 facultySlotUsage.add(
@@ -1327,19 +874,6 @@ export function generateLocalTimetable({
                 studentGroupSlotUsage.delete(
                     studentKey
                 );
-
-
-                // Recalculate days
-                usedDays.clear();
-
-                for (
-                    const item of
-                    selected
-                ) {
-                    usedDays.add(
-                        item.day
-                    );
-                }
 
 
                 facultyHours.set(

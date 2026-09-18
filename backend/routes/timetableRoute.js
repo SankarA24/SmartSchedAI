@@ -7,9 +7,11 @@ import Room from "../models/Room.js";
 
 
 import {
-    generateTimetableWithAI,
-    validateSchedule
+    generateTimetableWithAI
 } from "../utils/timetableGenerator.js";
+import {
+    validateSchedule
+} from "../utils/scheduleValidator.js";
 import {
     generateLocalTimetable
 } from "../utils/localScheduler.js";
