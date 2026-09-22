@@ -10,6 +10,8 @@ import { timetablesRouter } from "./routes/timetableRoute.js";
 import { aiRouter } from "./routes/aiRoute.js";
 import { notificationsRouter } from "./routes/notificationsRoute.js";
 import { authRouter } from "./routes/authRoute.js";
+import { usersRouter } from "./routes/usersRoute.js";
+import { studentsRouter } from "./routes/studentsRoute.js";
 
 const app = express();
 
@@ -30,6 +32,8 @@ app.use("/api/timetables", timetablesRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/users", usersRouter);
+app.use("/api/students", studentsRouter);
 
 const PORT = process.env.PORT || 5000;
 

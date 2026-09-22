@@ -30,6 +30,8 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  UserCog,
+  GraduationCap,
 } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/AppShell"
 import { StatusBadge } from "@/components/StatusBadge"
@@ -41,6 +43,8 @@ const ADMIN_NAV = [
   { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
   { id: "faculty", label: "Faculty", icon: UsersIcon, path: "/faculty" },
   { id: "rooms", label: "Rooms", icon: HomeIcon, path: "/rooms" },
+  { id: "users", label: "Users", icon: UserCog, path: "/users" },
+  { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
   {
     id: "timetables",
     label: "Timetables",

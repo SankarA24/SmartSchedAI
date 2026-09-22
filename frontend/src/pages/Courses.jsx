@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { CourseForm } from "@/components/CourseForm"
 import { DataTable } from "@/components/Data-table"
-import { Plus, BookOpen, Users, Calendar, LayoutDashboard, Home, Bell } from "lucide-react"
+import { Plus, BookOpen, Users, Calendar, LayoutDashboard, Home, Bell, UserCog, GraduationCap } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/AppShell"
 import { StatusBadge } from "@/components/StatusBadge"
 
@@ -24,6 +24,8 @@ export default function CoursesPage() {
     { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
     { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
     { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
+    { id: "users", label: "Users", icon: UserCog, path: "/users" },
+    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
     {
       id: "timetables",
       label: "Timetables",

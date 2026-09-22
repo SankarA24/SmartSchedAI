@@ -17,6 +17,8 @@ import {
   Bell,
   LayoutDashboard,
   MessageSquare,
+  UserCog,
+  GraduationCap,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Chatbot } from "@/components/Chatbot"
@@ -31,6 +33,8 @@ export default function Dashboard() {
   const [rooms, setRooms] = useState([])
   const [timetables, setTimetables] = useState([])
   const [notifications, setNotifications] = useState([])
+  const [users, setUsers] = useState([])
+  const [students, setStudents] = useState([])
 
   // --- State for Chatbot ---
   const [isChatOpen, setIsChatOpen] = useState(false)
@@ -40,25 +44,33 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const [coursesRes, facultyRes, roomsRes, timetablesRes, notificationsRes] = await Promise.all([
+      // Promise.allSettled so a single failing endpoint (e.g. /users or
+      // /students before those routes exist) doesn't blank the dashboard.
+      const [coursesRes, facultyRes, roomsRes, timetablesRes, notificationsRes, usersRes, studentsRes] =
+        await Promise.allSettled([
           api.get("/courses"),
           api.get("/faculty"),
           api.get("/rooms"),
           api.get("/timetables"),
           api.get("/notifications"),
+          api.get("/users"),
+          api.get("/students"),
         ])
 
-        setCourses(coursesRes.data)
-        setFaculty(facultyRes.data)
-        setRooms(roomsRes.data)
-        setTimetables(timetablesRes.data)
-        setNotifications(notificationsRes.data)
-        setLoading(false)
-      } catch (err) {
-        console.error("Failed to fetch data:", err)
-        setLoading(false)
+      const settledData = (result) => {
+        if (result.status === "fulfilled") return result.value.data
+        console.error("Failed to fetch dashboard data:", result.reason)
+        return []
       }
+
+      setCourses(settledData(coursesRes))
+      setFaculty(settledData(facultyRes))
+      setRooms(settledData(roomsRes))
+      setTimetables(settledData(timetablesRes))
+      setNotifications(settledData(notificationsRes))
+      setUsers(settledData(usersRes))
+      setStudents(settledData(studentsRes))
+      setLoading(false)
     }
 
     fetchData()
@@ -69,6 +81,8 @@ export default function Dashboard() {
     { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
     { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
     { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
+    { id: "users", label: "Users", icon: UserCog, path: "/users" },
+    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
     { id: "timetables", label: "Timetables", icon: Calendar, path: "/timetables" },
     { id: "notifications", label: "Notifications", icon: Bell, path: "/notifications", badge: unread },
   ]
@@ -95,8 +109,11 @@ export default function Dashboard() {
     totalFaculty: faculty.length,
     totalRooms: rooms.length,
     totalTimetables: timetables.length,
+    totalUsers: users.length,
+    totalStudents: students.length,
     activeConflicts: timetables.reduce((acc, t) => acc + (t.conflicts?.length || 0), 0),
     completedSchedules: timetables.filter((t) => t.status === "published").length,
+    publishedTimetables: timetables.filter((t) => t.status === "published").length,
     utilizationRate: timetables.length
       ? Math.round((timetables.filter((t) => t.schedule?.length).length / timetables.length) * 100)
       : 0,
@@ -132,6 +149,9 @@ export default function Dashboard() {
     { title: "Total Faculty", value: stats.totalFaculty, icon: Users },
     { title: "Total Rooms", value: stats.totalRooms, icon: Home },
     { title: "Total Timetables", value: stats.totalTimetables, icon: Calendar },
+    { title: "Total Users", value: stats.totalUsers, icon: UserCog },
+    { title: "Total Students", value: stats.totalStudents, icon: GraduationCap },
+    { title: "Published Timetables", value: stats.publishedTimetables, icon: CheckCircle },
     { title: "Active Conflicts", value: stats.activeConflicts, icon: AlertTriangle },
     { title: "Completed Schedules", value: stats.completedSchedules, icon: CheckCircle },
     { title: "Pending Tasks", value: stats.pendingTasks, icon: Bell },

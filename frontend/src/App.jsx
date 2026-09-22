@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Dashboard from "./pages/Dashboard";
 import CoursesPage from "./pages/Courses";
 import FacultyPage from "./pages/Faculty";
+import StudentsPage from "./pages/Students";
+import UsersPage from "./pages/Users";
 import RoomPage from "./pages/Rooms";
 import TimetablePage from "./pages/Timetable";
 import NotificationsPage from "./pages/Notifications";
@@ -180,6 +182,24 @@ function App() {
           element={
             <ProtectedRoute role="admin">
               <FacultyPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/students"
+          element={
+            <ProtectedRoute role="admin">
+              <StudentsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute role="admin">
+              <UsersPage />
             </ProtectedRoute>
           }
         />

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { DataTable } from "@/components/Data-table"
-import { Plus, Building, Users, Calendar, LayoutDashboard, BookOpen, Home, Bell, Edit, X, Clock } from "lucide-react"
+import { Plus, Building, Users, Calendar, LayoutDashboard, BookOpen, Home, Bell, Edit, X, Clock, UserCog, GraduationCap } from "lucide-react"
 import { Link } from "react-router-dom"
 
 export default function RoomPage() {
@@ -51,6 +51,8 @@ export default function RoomPage() {
     { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
     { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
     { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
+    { id: "users", label: "Users", icon: UserCog, path: "/users" },
+    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
     { id: "timetables", label: "Timetables", icon: Calendar, path: "/timetables" },
     { id: "notifications", label: "Notifications", icon: Bell, path: "/notifications" },
   ]

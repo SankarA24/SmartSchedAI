@@ -20,6 +20,8 @@ import {
   CheckCircle,
   Info,
   Check,
+  UserCog,
+  GraduationCap,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 
@@ -110,6 +112,8 @@ export default function NotificationsPage() {
     { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
     { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
     { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
+    { id: "users", label: "Users", icon: UserCog, path: "/users" },
+    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
     { id: "timetables", label: "Timetables", icon: Calendar, path: "/timetables" },
     { id: "notifications", label: "Notifications", icon: Bell, path: "/notifications" },
   ]

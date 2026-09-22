@@ -42,6 +42,17 @@ const StudentSchema = new mongoose.Schema(
       type: String,
       default: "A",
     },
+
+    year: {
+      type: Number,
+      min: 1,
+      max: 4,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+    },
   },
   {
     timestamps: true,
