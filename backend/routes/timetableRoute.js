@@ -17,6 +17,9 @@ import {
     generateLocalTimetable
 } from "../utils/localScheduler.js";
 import {
+    generateGeneticTimetable
+} from "../utils/geneticScheduler.js";
+import {
     DAYS,
     TIME_SLOTS,
     slotLabel
@@ -69,6 +72,43 @@ function sameDepartment(a, b) {
         String(a || "").trim().toLowerCase() ===
         String(b || "").trim().toLowerCase()
     );
+}
+
+// GA option limits (mirrors LIMITS in geneticScheduler.js).
+const GA_LIMITS = {
+    populationSize: { min: 10, max: 200 },
+    maxGenerations: { min: 10, max: 1000 }
+};
+
+// Keep only the GA options the frontend may set, coerce to
+// integers and clamp population / generations.
+function sanitizeGaOptions(raw) {
+    const source =
+        raw && typeof raw === "object" ? raw : {};
+
+    const options = {};
+
+    const seed = Number(source.seed);
+
+    if (Number.isFinite(seed)) {
+        options.seed = Math.floor(seed);
+    }
+
+    for (const key of ["populationSize", "maxGenerations"]) {
+
+        const value = Number(source[key]);
+
+        if (!Number.isFinite(value)) continue;
+
+        const { min, max } = GA_LIMITS[key];
+
+        options[key] = Math.min(
+            max,
+            Math.max(min, Math.floor(value))
+        );
+    }
+
+    return options;
 }
 
 // Build a Timetable query from optional list filters.
@@ -462,11 +502,17 @@ timetablesRouter.delete("/:id", adminOnly, async (req, res) => {
 //   1. validate body {department, semester, year,
 //      academicYear, gaOptions?, method?}
 //   2. loadSchedulingContext → 404 when no courses match
-//   3. AI (when allowed) → local constraint scheduler
-//      (GA will slot in here in Phase 4)
+//   3. AI (method === "ai" + GOOGLE_API_KEY) → genetic
+//      algorithm → local constraint scheduler fallback
+//      (/generate-local skips straight to local)
 //   4. validateSchedule on every result
 //   5. save as draft, notify, respond
 // =======================================================
+
+// Generation is CPU-bound and synchronous (GA / local solver), so
+// only one run is allowed per process at a time; concurrent calls
+// get a 409 instead of queuing further event-loop stalls.
+let generationInFlight = false;
 
 async function handleGeneration(req, res, { localOnly }) {
 
@@ -479,9 +525,8 @@ async function handleGeneration(req, res, { localOnly }) {
         method
     } = req.body || {};
 
-    // gaOptions is accepted now so the frontend contract is
-    // stable; the GA itself lands in Phase 4.
-    void gaOptions;
+    const geneticOptions =
+        sanitizeGaOptions(gaOptions);
 
 
     // -------------------------------------------------
@@ -506,6 +551,16 @@ async function handleGeneration(req, res, { localOnly }) {
     const groupLabel =
         `${department}, year ${year}, semester ${semester}, academic year ${academicYear}`;
 
+
+    if (generationInFlight) {
+
+        return res.status(409).json({
+            error:
+                "A timetable generation is already in progress. Please try again shortly."
+        });
+    }
+
+    generationInFlight = true;
 
     try {
 
@@ -606,11 +661,8 @@ async function handleGeneration(req, res, { localOnly }) {
 
         const tryAI =
             !localOnly &&
-            requestedMethod !== "local" &&
-            (
-                requestedMethod === "ai" ||
-                Boolean(process.env.GOOGLE_API_KEY)
-            );
+            requestedMethod === "ai" &&
+            Boolean(process.env.GOOGLE_API_KEY);
 
         let aiAttempted = false;
 
@@ -659,30 +711,105 @@ async function handleGeneration(req, res, { localOnly }) {
                 );
 
                 console.log(
-                    "🔄 Switching to local constraint scheduler..."
+                    "🔄 Switching to genetic algorithm scheduler..."
                 );
             }
         }
 
 
         // -------------------------------------------------
-        // STEP 2: LOCAL CONSTRAINT SCHEDULER
+        // STEP 2: GENETIC ALGORITHM (skipped by
+        // /generate-local). Falls back to the local
+        // constraint scheduler when it throws or the best
+        // chromosome still has hard violations.
         // -------------------------------------------------
 
-        const schedule =
-            generateLocalTimetable({
-                courses: relevantCourses,
-                faculty: relevantFaculty,
-                rooms: allRooms,
-                days: DAYS,
-                timeSlots: TIME_SLOTS.map(slotLabel),
-                getWeeklySessions
-            });
+        let schedule = null;
+        let gaStats = null;
+        let warning = null;
 
 
-        console.log(
-            `✅ Local scheduler generated ${schedule.length} entries.`
-        );
+        if (!localOnly) {
+
+            try {
+
+                console.log(
+                    "🧬 Running genetic algorithm scheduler...",
+                    geneticOptions
+                );
+
+                const result =
+                    generateGeneticTimetable({
+                        courses: relevantCourses,
+                        faculty: relevantFaculty,
+                        rooms: allRooms,
+                        options: geneticOptions
+                    });
+
+                if (result.stats.hardViolations > 0) {
+
+                    (result.stats.validationErrors || [])
+                        .forEach(error => {
+                            console.error("❌", error);
+                        });
+
+                    throw new Error(
+                        `Genetic algorithm finished with ${result.stats.hardViolations} hard violation(s) after ${result.stats.generations} generations.`
+                    );
+                }
+
+                schedule = result.schedule;
+                gaStats = result.stats;
+
+                console.log(
+                    `✅ Genetic algorithm generated ${schedule.length} entries ` +
+                    `(seed ${gaStats.seed}, ${gaStats.generations} generations, ` +
+                    `fitness ${gaStats.bestFitness.toFixed(4)}, ` +
+                    `soft penalty ${gaStats.softPenalty}).`
+                );
+
+            } catch (gaError) {
+
+                console.error(
+                    "⚠️ Genetic algorithm failed:"
+                );
+
+                console.error(
+                    gaError.message
+                );
+
+                console.log(
+                    "🔄 Switching to local constraint scheduler..."
+                );
+
+                warning =
+                    `Genetic algorithm did not produce a conflict-free timetable (${gaError.message}). ` +
+                    "Timetable generated using the local constraint scheduler.";
+            }
+        }
+
+
+        // -------------------------------------------------
+        // STEP 2b: LOCAL CONSTRAINT SCHEDULER
+        // (baseline for /generate-local, fallback otherwise)
+        // -------------------------------------------------
+
+        if (!schedule) {
+
+            schedule =
+                generateLocalTimetable({
+                    courses: relevantCourses,
+                    faculty: relevantFaculty,
+                    rooms: allRooms,
+                    days: DAYS,
+                    timeSlots: TIME_SLOTS.map(slotLabel),
+                    getWeeklySessions
+                });
+
+            console.log(
+                `✅ Local scheduler generated ${schedule.length} entries.`
+            );
+        }
 
 
         // -------------------------------------------------
@@ -699,7 +826,7 @@ async function handleGeneration(req, res, { localOnly }) {
         if (!validation.valid) {
 
             console.error(
-                "❌ Local timetable validation failed."
+                "❌ Generated timetable validation failed."
             );
 
             validation.errors.forEach(error => {
@@ -724,20 +851,20 @@ async function handleGeneration(req, res, { localOnly }) {
             if (hardErrors.length > 0) {
 
                 throw new Error(
-                    "Local scheduler generated an invalid timetable: " +
+                    "Scheduler generated an invalid timetable: " +
                     hardErrors.join(" | ")
                 );
             }
 
             console.warn(
                 "⚠️ Only specialization validation differs between " +
-                "the local scheduler and final validator."
+                "the scheduler and final validator."
             );
 
         } else {
 
             console.log(
-                "✅ Local timetable validation passed."
+                "✅ Generated timetable validation passed."
             );
         }
 
@@ -762,9 +889,20 @@ async function handleGeneration(req, res, { localOnly }) {
         // -------------------------------------------------
 
         const generationMethod =
-            aiAttempted
-                ? "local-fallback"
-                : "local";
+            gaStats
+                ? "genetic-algorithm"
+                : (aiAttempted || warning)
+                    ? "local-fallback"
+                    : "local";
+
+        const engineLabel =
+            gaStats
+                ? "genetic algorithm"
+                : "local constraint scheduler";
+
+        console.log(
+            `🏁 Result produced by: ${engineLabel} (${generationMethod})`
+        );
 
         const totalHours =
             timetableSchedule.length;
@@ -815,7 +953,18 @@ async function handleGeneration(req, res, { localOnly }) {
                     totalHours,
                     utilizationRate,
                     conflictCount: 0,
-                    generationMethod
+                    generationMethod,
+                    ...(gaStats
+                        ? {
+                            seed: gaStats.seed,
+                            generations: gaStats.generations,
+                            populationSize: gaStats.populationSize,
+                            bestFitness: gaStats.bestFitness,
+                            hardViolations: gaStats.hardViolations,
+                            softPenalty: gaStats.softPenalty,
+                            fitnessHistory: gaStats.fitnessHistory
+                        }
+                        : {})
                 }
             });
 
@@ -831,7 +980,7 @@ async function handleGeneration(req, res, { localOnly }) {
 
         await saveNotification(
             "Timetable Generated",
-            `Generated a validated timetable "${created.name}" with ${totalHours} entries using the local constraint scheduler.`,
+            `Generated a validated timetable "${created.name}" with ${totalHours} entries using the ${engineLabel}.`,
             "success"
         );
 
@@ -850,10 +999,14 @@ async function handleGeneration(req, res, { localOnly }) {
 
             stats: doc.metadata,
 
+            ...(warning
+                ? { warning }
+                : {}),
+
             ...(aiAttempted
                 ? {
                     message:
-                        "AI generation was unavailable or invalid. Timetable generated using the local constraint scheduler."
+                        `AI generation was unavailable or invalid. Timetable generated using the ${engineLabel}.`
                 }
                 : {})
         });
@@ -885,13 +1038,17 @@ async function handleGeneration(req, res, { localOnly }) {
             details:
                 error.message
         });
+
+    } finally {
+
+        generationInFlight = false;
     }
 }
 
 
 // =======================================================
 // GENERATE TIMETABLE
-// AI FIRST → LOCAL FALLBACK
+// AI (opt-in) → GENETIC ALGORITHM → LOCAL FALLBACK
 // =======================================================
 
 timetablesRouter.post("/generate", adminOnly, (req, res) =>
