@@ -354,6 +354,187 @@ const rooms = [
   },
 ];
 
+const electronicsCourses = [
+  {
+    name: "Digital Electronics",
+    code: "EC201",
+    department: "Electronics",
+    credits: 4,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "Logic gates, combinational and sequential circuits",
+    duration: 13,
+    prerequisites: [],
+    type: "lecture",
+    hoursPerWeek: 3,
+  },
+  {
+    name: "Signals and Systems",
+    code: "EC202",
+    department: "Electronics",
+    credits: 4,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "Continuous and discrete time signals and system analysis",
+    duration: 13,
+    prerequisites: [],
+    type: "lecture",
+    hoursPerWeek: 3,
+  },
+  {
+    name: "Analog Circuits",
+    code: "EC203",
+    department: "Electronics",
+    credits: 3,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "Diodes, transistors and analog amplifier circuits",
+    duration: 13,
+    prerequisites: [],
+    type: "lecture",
+    hoursPerWeek: 3,
+  },
+  {
+    name: "Microprocessors and Microcontrollers",
+    code: "EC204",
+    department: "Electronics",
+    credits: 4,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "8085/8051 architecture, assembly programming and interfacing",
+    duration: 13,
+    prerequisites: ["Digital Electronics"],
+    type: "lecture",
+    hoursPerWeek: 3,
+  },
+  {
+    name: "Digital Electronics Lab",
+    code: "EC205",
+    department: "Electronics",
+    credits: 3,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "Practical logic gates and sequential circuits laboratory",
+    duration: 13,
+    prerequisites: ["Digital Electronics"],
+    type: "lab",
+    hoursPerWeek: 3,
+  },
+  {
+    name: "Microprocessors Lab",
+    code: "EC206",
+    department: "Electronics",
+    credits: 3,
+    semester: 2,
+    year: 2,
+    academicYear: 2027,
+    description: "Practical assembly programming and interfacing laboratory",
+    duration: 13,
+    prerequisites: ["Microprocessors and Microcontrollers"],
+    type: "lab",
+    hoursPerWeek: 3,
+  },
+];
+
+const electronicsFaculty = [
+  {
+    name: "Dr Kavitha",
+    email: "kavitha@college.edu",
+    department: "Electronics",
+    specialization: ["Digital Electronics", "Digital Electronics Lab"],
+    availability: availability(),
+    maxHoursPerWeek: 18,
+    preferences: {
+      preferredTimeSlots: [],
+      avoidTimeSlots: [],
+    },
+  },
+  {
+    name: "Mr Suresh",
+    email: "suresh@college.edu",
+    department: "Electronics",
+    specialization: ["Signals and Systems", "Analog Circuits"],
+    availability: availability(),
+    maxHoursPerWeek: 20,
+    preferences: {
+      preferredTimeSlots: [],
+      avoidTimeSlots: [],
+    },
+  },
+  {
+    name: "Ms Divya",
+    email: "divya@college.edu",
+    department: "Electronics",
+    specialization: [
+      "Microprocessors and Microcontrollers",
+      "Microprocessors Lab",
+    ],
+    availability: availability(),
+    maxHoursPerWeek: 18,
+    preferences: {
+      preferredTimeSlots: [],
+      avoidTimeSlots: [],
+    },
+  },
+  {
+    name: "Dr Vikram",
+    email: "vikram@college.edu",
+    department: "Electronics",
+    specialization: ["Analog Circuits", "Digital Electronics"],
+    availability: availability(),
+    maxHoursPerWeek: 19,
+    preferences: {
+      preferredTimeSlots: [],
+      avoidTimeSlots: [],
+    },
+  },
+  {
+    name: "Mr Naveen",
+    email: "naveen@college.edu",
+    department: "Electronics",
+    specialization: [
+      "Microprocessors and Microcontrollers",
+      "Signals and Systems",
+    ],
+    availability: availability(),
+    maxHoursPerWeek: 20,
+    preferences: {
+      preferredTimeSlots: [],
+      avoidTimeSlots: [],
+    },
+  },
+];
+
+const electronicsRooms = [
+  {
+    name: "E201",
+    building: "Electronics Block",
+    floor: 2,
+    capacity: 60,
+    type: "lecture_hall",
+    equipment: ["Projector", "Smart Board"],
+    availability: FULL_DAY,
+  },
+  {
+    name: "E-Lab-1",
+    building: "Electronics Block",
+    floor: 2,
+    capacity: 40,
+    type: "lab",
+    equipment: ["Oscilloscopes", "Trainer Kits", "Multimeters"],
+    availability: FULL_DAY,
+  },
+];
+
+const allCourses = [...courses, ...electronicsCourses];
+const allFaculty = [...faculty, ...electronicsFaculty];
+const allRooms = [...rooms, ...electronicsRooms];
+
 async function seedData() {
   try {
     await dbConnect();
@@ -361,7 +542,7 @@ async function seedData() {
     console.log("\n=== SEEDING REALISTIC COLLEGE DATA ===\n");
 
     // Upsert courses
-    for (const course of courses) {
+    for (const course of allCourses) {
       await Course.findOneAndUpdate(
         { code: course.code },
         course,
@@ -369,10 +550,10 @@ async function seedData() {
       );
     }
 
-    console.log(`✅ Courses processed: ${courses.length}`);
+    console.log(`✅ Courses processed: ${allCourses.length}`);
 
     // Upsert faculty
-    for (const member of faculty) {
+    for (const member of allFaculty) {
       await Faculty.findOneAndUpdate(
         { email: member.email },
         member,
@@ -380,10 +561,10 @@ async function seedData() {
       );
     }
 
-    console.log(`✅ Faculty processed: ${faculty.length}`);
+    console.log(`✅ Faculty processed: ${allFaculty.length}`);
 
     // Upsert rooms
-    for (const room of rooms) {
+    for (const room of allRooms) {
       await Room.findOneAndUpdate(
         { name: room.name },
         room,
@@ -391,12 +572,20 @@ async function seedData() {
       );
     }
 
-    console.log(`✅ Rooms processed: ${rooms.length}`);
+    console.log(`✅ Rooms processed: ${allRooms.length}`);
 
     console.log("\n=== SEEDING COMPLETED SUCCESSFULLY ===");
-    console.log("Courses:", courses.length);
-    console.log("Faculty:", faculty.length);
-    console.log("Rooms:", rooms.length);
+    console.log("Courses:", allCourses.length);
+    console.log("Faculty:", allFaculty.length);
+    console.log("Rooms:", allRooms.length);
+
+    console.log("\n--- Per-cohort summary ---");
+    console.log(
+      `Computer Science (Sem 1, Year 1, AY 2026): ${courses.length} courses, ${faculty.length} faculty, ${rooms.length} rooms`
+    );
+    console.log(
+      `Electronics (Sem 2, Year 2, AY 2027): ${electronicsCourses.length} courses, ${electronicsFaculty.length} faculty, ${electronicsRooms.length} rooms`
+    );
 
     process.exit(0);
 

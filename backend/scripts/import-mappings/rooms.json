@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Optional --map file for: node scripts/importDataset.js --type rooms --file <csv> --map import-mappings/rooms.json",
+    "`columns` maps an exact CSV header (as it appears in your file) to a Room schema field, and takes precedence over the built-in header synonyms below.",
+    "`defaults` fills a field for every row whose CSV cell is blank. --department/--year/--semester/--academicYear CLI flags don't apply here, Room has none of those fields.",
+    "Built-in header synonyms (case/spacing/punctuation-insensitive; see utils/importNormalizers.js HEADER_SYNONYMS.rooms) — no --map needed if your headers already match one of these:",
+    "  roomno, room, roomname, name -> name (required, upsert key with building)",
+    "  building -> building (required, upsert key with name)",
+    "  floor -> floor (required number)",
+    "  seats, capacity -> capacity (required number)",
+    "  roomtype, type -> type (lecture_hall|lab|seminar_room|auditorium; lecture/classroom/lh/lecturehall -> lecture_hall, lab/laboratory/computerlab/complab -> lab, seminar/seminarroom -> seminar_room, auditorium/hall -> auditorium, anything else -> lecture_hall; blank uses lecture_hall on insert and leaves the stored value untouched on update)",
+    "  features, equipment, facilities -> equipment (split on , ; |, lowercased; synonyms: projector/lcd -> projector, smartboard/\"smart board\"/\"interactive board\" -> smartboard, ac/\"air conditioning\" -> ac, computers/pcs -> computers)",
+    "  availability -> availability (free text, e.g. \"Mon-Fri 09:00-17:30\" or \"Mon 09:00-12:00; Tue 14:00-17:00\"; unparseable defaults to Mon-Fri 09:00-17:30, weekends empty; a blank cell uses that default on insert and leaves the stored value untouched on update)"
+  ],
+  "columns": {
+    "Room No": "name",
+    "Building": "building",
+    "Floor": "floor",
+    "Capacity": "capacity",
+    "Room Type": "type",
+    "Features": "equipment",
+    "Availability": "availability"
+  },
+  "defaults": {}
+}

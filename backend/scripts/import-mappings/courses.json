@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Optional --map file for: node scripts/importDataset.js --type courses --file <csv> --map import-mappings/courses.json",
+    "`columns` maps an exact CSV header (as it appears in your file) to a Course schema field, and takes precedence over the built-in header synonyms below.",
+    "`defaults` fills a field for every row whose CSV cell is blank; --department/--year/--semester/--academicYear CLI flags fill those same four fields afterwards, for whatever is still blank.",
+    "Built-in header synonyms (case/spacing/punctuation-insensitive; see utils/importNormalizers.js HEADER_SYNONYMS.courses) — no --map needed if your headers already match one of these:",
+    "  code, coursecode -> code (required, upsert key)",
+    "  name, coursename, title -> name (required)",
+    "  department, dept, school -> department (required unless --department is passed)",
+    "  credits -> credits (required number)",
+    "  sem, semester -> semester (required number, unless --semester is passed)",
+    "  year, studyyear -> year (required number, unless --year is passed)",
+    "  academicyear, ay, session -> academicYear (number, unless --academicYear is passed)",
+    "  hours, hoursperweek -> hoursPerWeek (number, default 3)",
+    "  type, coursetype -> type (lecture|lab|seminar; lab/practical/laboratory -> lab, seminar -> seminar, anything else -> lecture; blank uses lecture on insert and leaves the stored value untouched on update)",
+    "  description -> description",
+    "  duration -> duration (weeks, default 13)",
+    "  prerequisites -> prerequisites (split on , ; | /, deduplicated)"
+  ],
+  "columns": {
+    "Course Code": "code",
+    "Course Name": "name",
+    "Department": "department",
+    "Credits": "credits",
+    "Semester": "semester",
+    "Study Year": "year",
+    "Academic Year": "academicYear",
+    "Hours/Week": "hoursPerWeek",
+    "Type": "type",
+    "Description": "description",
+    "Duration (weeks)": "duration",
+    "Prerequisites": "prerequisites"
+  },
+  "defaults": {}
+}

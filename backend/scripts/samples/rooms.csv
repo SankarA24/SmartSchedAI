@@ -1,0 +1,5 @@
+Room No,Building,Floor,Seats,Type,Features
+ME-LH1,Mechanical Block,1,70,Lecture,Projector; AC
+ME-SR1,Mechanical Block,2,45,Seminar,"Smart Board, AC"
+ME-WS1,Mechanical Block,0,40,Computer Lab,Computers; Projector
+ME-AUD,Mechanical Block,1,150,Auditorium,Projector; AC; Smart Board

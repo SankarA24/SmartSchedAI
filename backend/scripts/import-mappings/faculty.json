@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Optional --map file for: node scripts/importDataset.js --type faculty --file <csv> --map import-mappings/faculty.json",
+    "`columns` maps an exact CSV header (as it appears in your file) to a Faculty schema field, and takes precedence over the built-in header synonyms below.",
+    "`defaults` fills a field for every row whose CSV cell is blank; --department fills `department` afterwards for whatever is still blank (--year/--semester/--academicYear don't apply here, Faculty has no such fields).",
+    "Built-in header synonyms (case/spacing/punctuation-insensitive; see utils/importNormalizers.js HEADER_SYNONYMS.faculty) — no --map needed if your headers already match one of these:",
+    "  teachername, teacher, instructor, facultyname, name -> name (required)",
+    "  email -> email (required, unique, upsert key when present)",
+    "  dept, department, school -> department (required unless --department is passed; also the fallback upsert key with name, when email is blank)",
+    "  expertise, skills, specialisation, specialization, subjects -> specialization (split on , ; | /, deduplicated, casing preserved — used for fuzzy course matching)",
+    "  maxhours, maxhoursperweek, workload -> maxHoursPerWeek (required number)",
+    "  availability -> availability (free text, e.g. \"Mon-Fri 09:00-17:30\" or \"Mon 09:00-12:00; Tue 14:00-17:00\"; unparseable defaults to Mon-Fri 09:00-17:30, weekends empty; a blank cell uses that default on insert and leaves the stored value untouched on update)"
+  ],
+  "columns": {
+    "Faculty Name": "name",
+    "Email": "email",
+    "Department": "department",
+    "Expertise": "specialization",
+    "Max Hours/Week": "maxHoursPerWeek",
+    "Availability": "availability"
+  },
+  "defaults": {}
+}

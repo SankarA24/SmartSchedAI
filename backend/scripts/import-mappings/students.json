@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Optional --map file for: node scripts/importDataset.js --type students --file <csv> --map import-mappings/students.json",
+    "`columns` maps an exact CSV header (as it appears in your file) to a Student schema field, and takes precedence over the built-in header synonyms below.",
+    "`defaults` fills a field for every row whose CSV cell is blank; --department/--year/--semester/--academicYear CLI flags fill those same fields afterwards, for whatever is still blank.",
+    "Built-in header synonyms (case/spacing/punctuation-insensitive; see utils/importNormalizers.js HEADER_SYNONYMS.students) — no --map needed if your headers already match one of these:",
+    "  regno, rollno, registernumber -> registerNumber (required, unique, upsert key)",
+    "  studentname, name -> name (required)",
+    "  email -> email (required, unique)",
+    "  dept, department -> department (required unless --department is passed)",
+    "  sem, semester -> semester (required number, unless --semester is passed)",
+    "  academicyear -> academicYear (required number, unless --academicYear is passed)",
+    "  year -> year (study year 1-4, unless --year is passed)",
+    "  section, division -> section (default \"A\" on insert; blank leaves the stored value untouched on update)",
+    "  phone -> phone"
+  ],
+  "columns": {
+    "Register Number": "registerNumber",
+    "Student Name": "name",
+    "Email": "email",
+    "Department": "department",
+    "Semester": "semester",
+    "Study Year": "year",
+    "Academic Year": "academicYear",
+    "Section": "section",
+    "Phone": "phone"
+  },
+  "defaults": {}
+}
