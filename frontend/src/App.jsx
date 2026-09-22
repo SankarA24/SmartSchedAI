@@ -36,39 +36,99 @@ const getUser = () => {
   }
 };
 
+// Decode a JWT payload (base64url, no library). Returns null on any failure.
+const decodeJwtPayload = (token) => {
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "="
+    );
+    const json = decodeURIComponent(
+      atob(padded)
+        .split("")
+        .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join("")
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+// Role → home route.
+const getRoleHome = (user) => {
+  if (user?.role === "admin") return "/";
+  if (user?.role === "faculty") return "/faculty-portal";
+  if (user?.role === "student") return "/student-portal";
+  return "/login";
+};
+
+// Reads token + user from storage. An expired token counts as logged out
+// and clears storage; anything else unreadable also counts as logged out.
+const getActiveSession = () => {
+  const token = localStorage.getItem("token");
+  const user = getUser();
+
+  if (!token || !user) {
+    return null;
+  }
+
+  const payload = decodeJwtPayload(token);
+  if (payload?.exp && payload.exp * 1000 < Date.now()) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    return null;
+  }
+
+  return user;
+};
+
 
 // =====================================================
 // PROTECTED ROUTE
 // =====================================================
 
 const ProtectedRoute = ({ children, role }) => {
-  const token = localStorage.getItem("token");
-  const user = getUser();
+  const user = getActiveSession();
 
-  // Not logged in
-  if (!token || !user) {
+  // Not logged in (or token expired)
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 
   // Wrong role
   if (role && user.role !== role) {
-
-    if (user.role === "admin") {
-      return <Navigate to="/" replace />;
-    }
-
-    if (user.role === "faculty") {
-      return <Navigate to="/faculty-portal" replace />;
-    }
-
-    if (user.role === "student") {
-      return <Navigate to="/student-portal" replace />;
-    }
-
-    return <Navigate to="/login" replace />;
+    return <Navigate to={getRoleHome(user)} replace />;
   }
 
   return children;
+};
+
+
+// =====================================================
+// LOGIN ROUTE (redirect to role home if already logged in)
+// =====================================================
+
+const LoginRoute = () => {
+  const user = getActiveSession();
+
+  if (user) {
+    return <Navigate to={getRoleHome(user)} replace />;
+  }
+
+  return <Login />;
+};
+
+
+// =====================================================
+// FALLBACK ROUTE (role home if logged in, else /login)
+// =====================================================
+
+const RoleHomeOrLogin = () => {
+  const user = getActiveSession();
+  return <Navigate to={getRoleHome(user)} replace />;
 };
 
 
@@ -89,7 +149,7 @@ function App() {
 
         <Route
           path="/login"
-          element={<Login />}
+          element={<LoginRoute />}
         />
 
 
@@ -253,12 +313,32 @@ function App() {
 
 
         {/* ============================================
+            ALIAS REDIRECTS
+        ============================================ */}
+
+        <Route
+          path="/admin-dashboard"
+          element={<Navigate to="/" replace />}
+        />
+
+        <Route
+          path="/teacher-dashboard"
+          element={<Navigate to="/faculty-portal" replace />}
+        />
+
+        <Route
+          path="/student-dashboard"
+          element={<Navigate to="/student-portal" replace />}
+        />
+
+
+        {/* ============================================
             UNKNOWN URL
         ============================================ */}
 
         <Route
           path="*"
-          element={<Navigate to="/login" replace />}
+          element={<RoleHomeOrLogin />}
         />
 
       </Routes>
