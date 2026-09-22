@@ -24,6 +24,7 @@ import {
     isWithinAvailability,
     specializationMatches,
     roomTypeMatches,
+    roomCapacityMatches,
     courseGroupKey,
     isAvoidedSlot,
 } from "./schedulingHelpers.js";
@@ -511,6 +512,42 @@ export function validateSchedule(
 
             warnings.push(
                 `Faculty "${faculty.name}" was assigned to avoided time slot "${entry.day} ${entry.startTime}-${entry.endTime}"`
+            );
+        }
+    }
+
+
+    // -------------------------------------------------------
+    // 15. Room capacity - HARD CONSTRAINT
+    // -------------------------------------------------------
+
+    for (const entry of schedule) {
+
+        const course =
+            courseById.get(String(entry.courseId));
+
+        const room =
+            roomById.get(String(entry.roomId));
+
+        if (!course || !room) {
+            continue;
+        }
+
+        const expectedStudents = Number(
+            course.expectedStudents ||
+            course.capacity ||
+            course.studentCount ||
+            0
+        );
+
+        if (expectedStudents === 0) {
+            continue;
+        }
+
+        if (!roomCapacityMatches(course, room)) {
+
+            errors.push(
+                `Room "${room.name}" (capacity ${room.capacity}) is too small for course "${course.name}" (${expectedStudents} students expected)`
             );
         }
     }

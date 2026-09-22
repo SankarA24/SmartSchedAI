@@ -329,13 +329,17 @@ export default function TimetablePage() {
   const [lastRun, setLastRun] = useState(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [form, setForm] = useState({
-    department: "Computer Science",
-    semester: "1",
-    academicYear: new Date().getFullYear(),
+    department: "",
+    semester: "",
+    year: "",
+    academicYear: "",
     seed: "",
     populationSize: "",
     maxGenerations: "",
   })
+  const [filterDepartment, setFilterDepartment] = useState("all")
+  const [filterAcademicYear, setFilterAcademicYear] = useState("all")
+  const [filterStatus, setFilterStatus] = useState("all")
 
   useEffect(() => {
     fetchTimetables()
@@ -433,8 +437,8 @@ export default function TimetablePage() {
   }
 
   async function runGeneration(endpoint) {
-    if (!form.department || !form.semester) {
-      setError("Please fill in department and semester.")
+    if (!form.department || !form.semester || !form.year || !form.academicYear) {
+      setError("Please fill in department, year, semester and academic year.")
       setErrorDetails([])
       return
     }
@@ -448,8 +452,9 @@ export default function TimetablePage() {
 
       const response = await api.post(endpoint, {
         department: form.department,
-        semester: Number.parseInt(form.semester),
-        academicYear: Number.parseInt(form.academicYear),
+        semester: Number.parseInt(form.semester, 10),
+        year: Number.parseInt(form.year, 10),
+        academicYear: Number.parseInt(form.academicYear, 10),
         ...(Object.keys(gaOptions).length > 0 ? { gaOptions } : {}),
       })
 
@@ -509,17 +514,36 @@ export default function TimetablePage() {
     setShowAdvanced(true)
   }
 
-  async function togglePublish(timetable) {
+  async function publishTimetable(timetable) {
     setNotice(null)
     clearMessages()
 
     try {
-      const newStatus =
-        timetable.status === "published" ? "draft" : "published"
+      await api.patch(`/timetables/${timetable._id}/publish`)
 
+      await fetchTimetables()
+
+      if (selected?._id === timetable._id) {
+        await viewTimetable(timetable._id)
+      }
+    } catch (err) {
+      console.error(err)
+      setError(
+        `Failed to publish timetable: ${
+          err.response?.data?.error || err.message || "Unknown error"
+        }`
+      )
+    }
+  }
+
+  async function unpublishTimetable(timetable) {
+    setNotice(null)
+    clearMessages()
+
+    try {
       await api.put(`/timetables/${timetable._id}`, {
         ...timetable,
-        status: newStatus,
+        status: "draft",
       })
 
       await fetchTimetables()
@@ -530,11 +554,17 @@ export default function TimetablePage() {
     } catch (err) {
       console.error(err)
       setError(
-        `Failed to change timetable status: ${
+        `Failed to unpublish timetable: ${
           err.response?.data?.error || err.message || "Unknown error"
         }`
       )
     }
+  }
+
+  function togglePublish(timetable) {
+    return timetable.status === "published"
+      ? unpublishTimetable(timetable)
+      : publishTimetable(timetable)
   }
 
   async function deleteTimetable(timetable) {
@@ -578,9 +608,83 @@ export default function TimetablePage() {
     URL.revokeObjectURL(url)
   }
 
+  async function exportTimetableCsv() {
+    if (!selected) return
+
+    setNotice(null)
+    clearMessages()
+
+    try {
+      const response = await api.get(
+        `/timetables/${selected._id}/export?format=csv`,
+        { responseType: "blob" }
+      )
+      const blob = new Blob([response.data], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `${selected.name.replace(/\s+/g, "_")}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      setError(
+        `Failed to export CSV: ${
+          err.response?.data?.error || err.message || "Unknown error"
+        }`
+      )
+    }
+  }
+
   function printTimetable() {
     window.print()
   }
+
+  const departmentOptions = Array.from(
+    new Set(courses.map((c) => c.department).filter(Boolean))
+  ).sort()
+
+  const academicYearOptions = (() => {
+    const distinct = Array.from(
+      new Set(
+        courses
+          .map((c) => c.academicYear)
+          .filter((value) => value !== undefined && value !== null)
+      )
+    ).sort((a, b) => a - b)
+    return distinct.length > 0 ? distinct : [new Date().getFullYear()]
+  })()
+
+  const filterDepartmentOptions = Array.from(
+    new Set(timetables.map((t) => t.department).filter(Boolean))
+  ).sort()
+
+  const filterAcademicYearOptions = Array.from(
+    new Set(
+      timetables
+        .map((t) => t.academicYear ?? t.year)
+        .filter((value) => value !== undefined && value !== null)
+        .map(String)
+    )
+  ).sort()
+
+  const filteredTimetables = timetables.filter((t) => {
+    if (filterDepartment !== "all" && t.department !== filterDepartment) {
+      return false
+    }
+    if (
+      filterAcademicYear !== "all" &&
+      String(t.academicYear ?? t.year) !== filterAcademicYear
+    ) {
+      return false
+    }
+    if (filterStatus !== "all" && t.status !== filterStatus) {
+      return false
+    }
+    return true
+  })
 
   return (
     <AppShell brand={{ title: "SmartSchedAI", subtitle: "Admin" }} nav={ADMIN_NAV}>
@@ -601,6 +705,10 @@ export default function TimetablePage() {
               <Button variant="outline" size="sm" onClick={exportTimetable}>
                 <Download className="h-4 w-4" />
                 Export
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportTimetableCsv}>
+                <Download className="h-4 w-4" />
+                Export CSV
               </Button>
               <Button variant="outline" size="sm" onClick={printTimetable}>
                 <Printer className="h-4 w-4" />
@@ -670,19 +778,49 @@ export default function TimetablePage() {
 
         <CardContent className="p-5">
           <form onSubmit={generateTimetable}>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-foreground">
                   Department
                 </label>
-                <Input
+                <Select
                   value={form.department}
-                  onChange={(e) =>
-                    setForm({ ...form, department: e.target.value })
+                  onValueChange={(value) =>
+                    setForm({ ...form, department: value })
                   }
-                  placeholder="Computer Science"
-                  required
-                />
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departmentOptions.map((dept) => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-foreground">
+                  Year
+                </label>
+                <Select
+                  value={form.year}
+                  onValueChange={(value) => setForm({ ...form, year: value })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4].map((yr) => (
+                      <SelectItem key={yr} value={String(yr)}>
+                        Year {yr}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
@@ -712,16 +850,23 @@ export default function TimetablePage() {
                 <label className="mb-2 block text-sm font-medium text-foreground">
                   Academic year
                 </label>
-                <Input
-                  type="number"
+                <Select
                   value={form.academicYear}
-                  onChange={(e) =>
-                    setForm({ ...form, academicYear: e.target.value })
+                  onValueChange={(value) =>
+                    setForm({ ...form, academicYear: value })
                   }
-                  min="2020"
-                  max="2035"
-                  className="tabular-nums"
-                />
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select academic year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {academicYearOptions.map((ay) => (
+                      <SelectItem key={ay} value={String(ay)}>
+                        {ay}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -825,9 +970,10 @@ export default function TimetablePage() {
                 variant="ghost"
                 onClick={() =>
                   setForm({
-                    department: "Computer Science",
-                    semester: "1",
-                    academicYear: new Date().getFullYear(),
+                    department: "",
+                    semester: "",
+                    year: "",
+                    academicYear: "",
                     seed: "",
                     populationSize: "",
                     maxGenerations: "",
@@ -849,6 +995,57 @@ export default function TimetablePage() {
           </p>
         </div>
 
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="w-full max-w-[220px]">
+            <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All departments</SelectItem>
+                {filterDepartmentOptions.map((dept) => (
+                  <SelectItem key={dept} value={dept}>
+                    {dept}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="w-full max-w-[180px]">
+            <Select
+              value={filterAcademicYear}
+              onValueChange={setFilterAcademicYear}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Academic year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All academic years</SelectItem>
+                {filterAcademicYearOptions.map((ay) => (
+                  <SelectItem key={ay} value={ay}>
+                    {ay}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="w-full max-w-[160px]">
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="published">Published</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {loadingList ? (
           <div className="rounded-lg border border-border bg-card p-10 text-center shadow-sm">
             <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-border border-t-primary" />
@@ -863,9 +1060,16 @@ export default function TimetablePage() {
               No timetables available
             </p>
           </div>
+        ) : filteredTimetables.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border p-10 text-center">
+            <CalendarDays className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              No timetables match the selected filters
+            </p>
+          </div>
         ) : (
           <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            {timetables.map((timetable) => (
+            {filteredTimetables.map((timetable) => (
               <div
                 key={timetable._id}
                 className={`rounded-lg border bg-card p-4 shadow-sm transition-colors duration-150 ${
@@ -880,8 +1084,8 @@ export default function TimetablePage() {
                       {timetable.name}
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {timetable.department} · Semester {timetable.semester} ·{" "}
-                      {timetable.year}
+                      Year {timetable.year} · Sem {timetable.semester} · AY{" "}
+                      {timetable.academicYear ?? timetable.year}
                     </p>
                   </div>
 

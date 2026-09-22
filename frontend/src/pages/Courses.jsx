@@ -142,8 +142,12 @@ export default function CoursesPage() {
     },
     {
       key: "year",
-      label: "Year",
-      render: (course) => <StatusBadge variant="neutral">{course.year}</StatusBadge>,
+      label: "Year · AY",
+      render: (course) => (
+        <StatusBadge variant="neutral">
+          Year {course.year}{course.academicYear ? ` · ${course.academicYear}` : ""}
+        </StatusBadge>
+      ),
     },
     {
       key: "prerequisites",

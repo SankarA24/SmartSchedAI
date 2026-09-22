@@ -16,14 +16,25 @@ const ScheduleEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const FitnessHistoryEntrySchema = new mongoose.Schema(
+  {
+    generation: { type: Number },
+    best: { type: Number },
+    average: { type: Number },
+  },
+  { _id: false }
+);
+
 const TimetableSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     semester: { type: String, required: true },
     year: { type: Number, required: true },
+    academicYear: { type: Number },
     department: { type: String, required: true },
     schedule: [ScheduleEntrySchema],
     status: { type: String, enum: ["draft", "published", "archived"], default: "draft" },
+    publishedAt: { type: Date },
     conflicts: [
       {
         type: { type: String, required: true },
@@ -35,10 +46,20 @@ const TimetableSchema = new mongoose.Schema(
       totalHours: { type: Number, default: 0 },
       utilizationRate: { type: Number, default: 0 },
       conflictCount: { type: Number, default: 0 },
+      generationMethod: { type: String },
+      seed: { type: Number },
+      generations: { type: Number },
+      populationSize: { type: Number },
+      bestFitness: { type: Number },
+      hardViolations: { type: Number },
+      softPenalty: { type: Number },
+      fitnessHistory: [FitnessHistoryEntrySchema],
     },
   },
   { timestamps: true }
 );
+
+TimetableSchema.index({ department: 1, semester: 1, year: 1, academicYear: 1, status: 1 });
 
 const Timetable = mongoose.model("Timetable", TimetableSchema);
 export default Timetable;

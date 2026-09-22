@@ -14,7 +14,8 @@ export function CourseForm({ initialData = null, onSubmit, loading }) {
     department: "",
     credits: 3,
     semester: 1,
-    year: new Date().getFullYear(),
+    year: 1,
+    academicYear: new Date().getFullYear(),
     description: "",
     prerequisites: [],
     type: "lecture",
@@ -32,7 +33,8 @@ export function CourseForm({ initialData = null, onSubmit, loading }) {
         department: initialData.department || "",
         credits: initialData.credits ?? 3,
         semester: initialData.semester ?? 1,
-        year: initialData.year ?? new Date().getFullYear(),
+        year: initialData.year ?? 1,
+        academicYear: initialData.academicYear ?? new Date().getFullYear(),
         description: initialData.description || "",
         prerequisites: initialData.prerequisites || [],
         type: initialData.type || "lecture",
@@ -48,7 +50,13 @@ export function CourseForm({ initialData = null, onSubmit, loading }) {
     setFormData((prev) => ({
       ...prev,
       [name]:
-        name === "credits" || name === "semester" || name === "year" || name === "hoursPerWeek" ? Number(value) : value,
+        name === "credits" ||
+        name === "semester" ||
+        name === "year" ||
+        name === "academicYear" ||
+        name === "hoursPerWeek"
+          ? Number(value)
+          : value,
     }))
   }
 
@@ -141,7 +149,7 @@ export function CourseForm({ initialData = null, onSubmit, loading }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             {/* Credits */}
             <div className="space-y-3">
               <label className="block text-sm font-semibold text-slate-200 mb-2 tracking-wide">Credits *</label>
@@ -178,14 +186,35 @@ export function CourseForm({ initialData = null, onSubmit, loading }) {
               </div>
             </div>
 
+            {/* Year (study year) */}
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-slate-200 mb-2 tracking-wide">Year *</label>
+              <div className="relative">
+                <select
+                  name="year"
+                  value={formData.year}
+                  onChange={handleChange}
+                  className="w-full bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl px-4 py-3 text-white focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20 transition-all duration-300 hover:bg-white/15 appearance-none cursor-pointer"
+                  required
+                >
+                  {[1, 2, 3, 4].map((y) => (
+                    <option key={y} value={y} className="bg-slate-800 text-white">
+                      Year {y}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-xl pointer-events-none opacity-0 hover:opacity-100 transition-opacity duration-300" />
+              </div>
+            </div>
+
             {/* Academic Year */}
             <div className="space-y-3">
               <label className="block text-sm font-semibold text-slate-200 mb-2 tracking-wide">Academic Year *</label>
               <div className="relative">
                 <Input
                   type="number"
-                  name="year"
-                  value={formData.year}
+                  name="academicYear"
+                  value={formData.academicYear}
                   onChange={handleChange}
                   required
                   min="2020"

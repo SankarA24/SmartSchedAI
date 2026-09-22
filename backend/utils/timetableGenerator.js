@@ -1292,7 +1292,8 @@ Generate the complete timetable now.
 // =========================================================
 
 export async function generateTimetableWithAI(
-    request
+    request,
+    context = null
 ) {
 
     console.log(
@@ -1316,6 +1317,7 @@ export async function generateTimetableWithAI(
         const {
             department,
             semester,
+            year,
             academicYear,
         } = request;
 
@@ -1337,44 +1339,93 @@ export async function generateTimetableWithAI(
 
 
         // ---------------------------------------------------
-        // Fetch database data
+        // Resolve courses, faculty and rooms
+        // When a pre-loaded context is supplied (see
+        // utils/schedulingContext.js) skip the DB queries
+        // and the department/semester filtering entirely.
         // ---------------------------------------------------
 
-        console.log(
-            "Fetching courses, faculty and rooms..."
-        );
+        let relevantCourses;
 
-        const allCourses =
-            await Course.find({});
+        let relevantFaculty;
 
-        const allFaculty =
-            await Faculty.find({});
-
-        const allRooms =
-            await Room.find({});
+        let allRooms;
 
 
-        // ---------------------------------------------------
-        // Filter courses
-        // ---------------------------------------------------
+        if (
+            context &&
+            Array.isArray(context.courses) &&
+            Array.isArray(context.faculty) &&
+            Array.isArray(context.rooms)
+        ) {
 
-        const relevantCourses =
-            allCourses.filter(
-                course =>
-                    (
-                        course.department ||
-                        ""
-                    )
-                        .toLowerCase() ===
-                        department.toLowerCase()
-                    &&
-                    Number(
-                        course.semester
-                    ) ===
-                    Number(
-                        semester
-                    )
+            console.log(
+                "Using pre-loaded scheduling context..."
             );
+
+            relevantCourses =
+                context.courses;
+
+            relevantFaculty =
+                context.faculty;
+
+            allRooms =
+                context.rooms;
+
+        } else {
+
+            console.log(
+                "Fetching courses, faculty and rooms..."
+            );
+
+            const allCourses =
+                await Course.find({});
+
+            const allFaculty =
+                await Faculty.find({});
+
+            allRooms =
+                await Room.find({});
+
+
+            // -----------------------------------------------
+            // Filter courses
+            // -----------------------------------------------
+
+            relevantCourses =
+                allCourses.filter(
+                    course =>
+                        (
+                            course.department ||
+                            ""
+                        )
+                            .toLowerCase() ===
+                            department.toLowerCase()
+                        &&
+                        Number(
+                            course.semester
+                        ) ===
+                        Number(
+                            semester
+                        )
+                );
+
+
+            // -----------------------------------------------
+            // Filter faculty
+            // -----------------------------------------------
+
+            relevantFaculty =
+                allFaculty.filter(
+                    faculty =>
+                        (
+                            faculty.department ||
+                            ""
+                        )
+                            .toLowerCase() ===
+                        department.toLowerCase()
+                );
+        }
 
 
         if (
@@ -1385,22 +1436,6 @@ export async function generateTimetableWithAI(
                 `No courses found for ${department}, Semester ${semester}.`
             );
         }
-
-
-        // ---------------------------------------------------
-        // Filter faculty
-        // ---------------------------------------------------
-
-        const relevantFaculty =
-            allFaculty.filter(
-                faculty =>
-                    (
-                        faculty.department ||
-                        ""
-                    )
-                        .toLowerCase() ===
-                    department.toLowerCase()
-            );
 
 
         if (
@@ -1744,7 +1779,9 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
         const timetableData = {
 
             name:
-                `${department} - Semester ${semester} ${academicYear}`,
+                year !== undefined && year !== null
+                    ? `${department} - Year ${year} Sem ${semester} (${academicYear})`
+                    : `${department} - Semester ${semester} ${academicYear}`,
 
             department,
 
@@ -1754,7 +1791,14 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
                 ),
 
             year:
-                parseInt(
+                year !== undefined && year !== null
+                    ? Number(year)
+                    : parseInt(
+                        academicYear
+                    ),
+
+            academicYear:
+                Number(
                     academicYear
                 ),
 
@@ -1775,6 +1819,9 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
 
                 conflictCount:
                     0,
+
+                generationMethod:
+                    "ai",
             },
         };
 
