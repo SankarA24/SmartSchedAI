@@ -64,7 +64,14 @@ function Login() {
         });
         data = response.data;
       } catch (requestError) {
-        const errData = requestError.response?.data || {};
+        // No response at all means the request never reached the API
+        // (server down, wrong port, CORS) - not a credentials problem.
+        if (!requestError.response) {
+          throw new Error(
+            "Cannot reach the server. Make sure the backend is running on port 5000 and open the app at http://localhost:5173."
+          );
+        }
+        const errData = requestError.response.data || {};
         throw new Error(
           errData.error ||
             errData.message ||
