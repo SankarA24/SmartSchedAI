@@ -1,7 +1,11 @@
 import { Router } from "express";
 import Room from "../models/Room.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const roomsRouter = Router();
+
+roomsRouter.use(requireAuth);
+const adminOnly = requireRole("admin");
 
 
 roomsRouter.get("/", async (req, res) => {
@@ -29,7 +33,7 @@ roomsRouter.get("/:id", async (req, res) => {
 });
 
 
-roomsRouter.post("/", async (req, res) => {
+roomsRouter.post("/", adminOnly, async (req, res) => {
   try {
     const room = new Room(req.body);
     await room.save(); 
@@ -41,7 +45,7 @@ roomsRouter.post("/", async (req, res) => {
 });
 
 
-roomsRouter.put("/:id", async (req, res) => {
+roomsRouter.put("/:id", adminOnly, async (req, res) => {
   try {
     const room = await Room.findByIdAndUpdate(req.params.id, req.body, {
       new: true, 
@@ -58,7 +62,7 @@ roomsRouter.put("/:id", async (req, res) => {
 });
 
 
-roomsRouter.delete("/:id", async (req, res) => {
+roomsRouter.delete("/:id", adminOnly, async (req, res) => {
   try {
     const room = await Room.findByIdAndDelete(req.params.id);
     if (!room) {

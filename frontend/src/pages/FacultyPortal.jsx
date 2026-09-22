@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -51,14 +51,14 @@ export default function FacultyPortal() {
         let facultyData = null;
 
         if (user.facultyId) {
-          const facultyResponse = await axios.get(
-            `http://localhost:5000/api/faculty/${user.facultyId}`
+          const facultyResponse = await api.get(
+            `/faculty/${user.facultyId}`
           );
 
           facultyData = facultyResponse.data;
         } else if (user.email) {
-          const facultyResponse = await axios.get(
-            "http://localhost:5000/api/faculty"
+          const facultyResponse = await api.get(
+            "/faculty"
           );
 
           facultyData = facultyResponse.data.find(
@@ -84,9 +84,9 @@ export default function FacultyPortal() {
           coursesResponse,
           notificationsResponse,
         ] = await Promise.all([
-          axios.get("http://localhost:5000/api/timetables"),
-          axios.get("http://localhost:5000/api/courses"),
-          axios.get("http://localhost:5000/api/notifications"),
+          api.get("/timetables"),
+          api.get("/courses"),
+          api.get("/notifications"),
         ]);
 
         setTimetables(timetablesResponse.data || []);

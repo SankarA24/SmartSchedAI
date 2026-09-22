@@ -1,7 +1,7 @@
 
 
 import { useState, useEffect } from "react"
-import axios from "axios"
+import api from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CourseForm } from "@/components/CourseForm"
@@ -42,7 +42,7 @@ export default function CoursesPage() {
   const fetchCourses = async () => {
     try {
       setLoading(true)
-      const res = await axios.get("http://localhost:5000/api/courses/")
+      const res = await api.get("/courses/")
       setCourses(res.data)
     } catch (err) {
       console.error("Failed to fetch courses:", err)
@@ -59,7 +59,7 @@ export default function CoursesPage() {
   const handleCreateCourse = async (courseData) => {
     try {
       setFormLoading(true)
-      await axios.post("http://localhost:5000/api/courses/", courseData)
+      await api.post("/courses/", courseData)
       setShowForm(false)
       setEditingCourse(null)
       fetchCourses()
@@ -74,7 +74,7 @@ export default function CoursesPage() {
   const handleUpdateCourse = async (id, courseData) => {
     try {
       setFormLoading(true)
-      await axios.put(`http://localhost:5000/api/courses/${id}`, courseData)
+      await api.put(`/courses/${id}`, courseData)
       setEditingCourse(null)
       setShowForm(false)
       fetchCourses()
@@ -88,7 +88,7 @@ export default function CoursesPage() {
   // Delete a course
   const handleDeleteCourse = async (id) => {
     try {
-      await axios.delete(`http://localhost:5000/api/courses/${id}`)
+      await api.delete(`/courses/${id}`)
       // if deleting the currently editing course, clear form
       if (editingCourse && editingCourse._id === id) {
         setEditingCourse(null)

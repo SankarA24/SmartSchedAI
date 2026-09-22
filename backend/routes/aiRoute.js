@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { GoogleGenAI } from "@google/genai";
+import { requireAuth } from "../middleware/auth.js";
 
 export const aiRouter = Router();
+
+aiRouter.use(requireAuth);
 const ai = new GoogleGenAI({
   apiKey: process.env.GOOGLE_API_KEY,});
 

@@ -12,7 +12,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 
-const API_URL = "http://localhost:5000";
+import api from "@/lib/api";
 
 const DAYS = [
   "Monday",
@@ -64,53 +64,22 @@ const fetchFacultyTimetable = async (loggedUser) => {
     setLoading(true);
     setError("");
 
-    const token = localStorage.getItem("token");
-
-    const headers = {
-      Authorization: `Bearer ${token}`,
-    };
-
     // Fetch timetables, courses and rooms together
-    const [timetableResponse, coursesResponse, roomsResponse] =
-      await Promise.all([
-        fetch(`${API_URL}/api/timetables`, {
-          headers,
-        }),
-
-        fetch(`${API_URL}/api/courses`, {
-          headers,
-        }),
-
-        fetch(`${API_URL}/api/rooms`, {
-          headers,
-        }),
-      ]);
-
-    const timetableData = await timetableResponse.json();
-    const coursesData = await coursesResponse.json();
-    const roomsData = await roomsResponse.json();
-
-    if (!timetableResponse.ok) {
+    let timetableData, coursesData, roomsData;
+    try {
+      const [timetableResponse, coursesResponse, roomsResponse] =
+        await Promise.all([
+          api.get("/timetables"),
+          api.get("/courses"),
+          api.get("/rooms"),
+        ]);
+      timetableData = timetableResponse.data;
+      coursesData = coursesResponse.data;
+      roomsData = roomsResponse.data;
+    } catch (requestError) {
+      const data = requestError.response?.data;
       throw new Error(
-        timetableData.error ||
-          timetableData.message ||
-          "Failed to fetch timetable"
-      );
-    }
-
-    if (!coursesResponse.ok) {
-      throw new Error(
-        coursesData.error ||
-          coursesData.message ||
-          "Failed to fetch courses"
-      );
-    }
-
-    if (!roomsResponse.ok) {
-      throw new Error(
-        roomsData.error ||
-          roomsData.message ||
-          "Failed to fetch rooms"
+        data?.error || data?.message || requestError.message || "Failed to fetch timetable"
       );
     }
 

@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react"
-import axios from "axios"
+import api from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { FacultyForm } from "@/components/Faculty-Form"
@@ -40,7 +40,7 @@ export default function FacultyPage() {
   const fetchFaculty = async () => {
     setLoading(true)
     try {
-      const res = await axios.get("http://localhost:5000/api/faculty")
+      const res = await api.get("/faculty")
       setFaculty(Array.isArray(res.data) ? res.data : [])
     } catch (error) {
       console.error(error)
@@ -58,9 +58,9 @@ export default function FacultyPage() {
     setFormLoading(true)
     try {
       if (editingFaculty) {
-        await axios.put(`http://localhost:5000/api/faculty/${editingFaculty._id}`, data)
+        await api.put(`/faculty/${editingFaculty._id}`, data)
       } else {
-        await axios.post("http://localhost:5000/api/faculty", data)
+        await api.post("/faculty", data)
       }
       setShowForm(false)
       setEditingFaculty(null)
@@ -74,7 +74,7 @@ export default function FacultyPage() {
 
   const handleDelete = async (facultyMember) => {
     try {
-      await axios.delete(`http://localhost:5000/api/faculty/${facultyMember._id}`)
+      await api.delete(`/faculty/${facultyMember._id}`)
       if (editingFaculty && editingFaculty._id === facultyMember._id) {
         setEditingFaculty(null)
         setShowForm(false)

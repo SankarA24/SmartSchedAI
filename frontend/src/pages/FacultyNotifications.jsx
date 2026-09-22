@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 
 import {
   LayoutDashboard,
@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 
 import { Link, useNavigate } from "react-router-dom";
-
-const API_URL = "http://localhost:5000";
 
 export default function FacultyNotifications() {
   const navigate = useNavigate();
@@ -41,14 +39,14 @@ export default function FacultyNotifications() {
         let facultyData = null;
 
         if (user.facultyId) {
-          const response = await axios.get(
-            `${API_URL}/api/faculty/${user.facultyId}`
+          const response = await api.get(
+            `/faculty/${user.facultyId}`
           );
 
           facultyData = response.data;
         } else if (user.email) {
-          const response = await axios.get(
-            `${API_URL}/api/faculty`
+          const response = await api.get(
+            `/faculty`
           );
 
           facultyData = response.data.find(
@@ -60,8 +58,8 @@ export default function FacultyNotifications() {
 
         setFaculty(facultyData);
 
-        const response = await axios.get(
-          `${API_URL}/api/notifications`
+        const response = await api.get(
+          `/notifications`
         );
 
         setNotifications(response.data || []);
@@ -87,12 +85,7 @@ export default function FacultyNotifications() {
   const markAsRead = async (notification) => {
     try {
       if (notification._id) {
-        await axios.patch(
-          `${API_URL}/api/notifications/${notification._id}`,
-          {
-            isRead: true,
-          }
-        );
+        await api.put(`/notifications/${notification._id}/read`);
       }
 
       setNotifications((prev) =>

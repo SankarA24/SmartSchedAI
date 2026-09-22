@@ -23,8 +23,12 @@ import {
 import {
     getWeeklySessions
 } from "../utils/schedulingHelpers.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const timetablesRouter = Router();
+
+timetablesRouter.use(requireAuth);
+const adminOnly = requireRole("admin");
 
 
 // =======================================================
@@ -92,7 +96,7 @@ timetablesRouter.get("/:id", async (req, res) => {
 // CREATE NEW TIMETABLE
 // =======================================================
 
-timetablesRouter.post("/", async (req, res) => {
+timetablesRouter.post("/", adminOnly, async (req, res) => {
 
     try {
 
@@ -121,7 +125,7 @@ timetablesRouter.post("/", async (req, res) => {
 // UPDATE TIMETABLE
 // =======================================================
 
-timetablesRouter.put("/:id", async (req, res) => {
+timetablesRouter.put("/:id", adminOnly, async (req, res) => {
 
     try {
 
@@ -162,7 +166,7 @@ timetablesRouter.put("/:id", async (req, res) => {
 // DELETE TIMETABLE
 // =======================================================
 
-timetablesRouter.delete("/:id", async (req, res) => {
+timetablesRouter.delete("/:id", adminOnly, async (req, res) => {
 
     try {
 
@@ -199,7 +203,7 @@ timetablesRouter.delete("/:id", async (req, res) => {
 // AI FIRST → LOCAL FALLBACK
 // =======================================================
 
-timetablesRouter.post("/generate", async (req, res) => {
+timetablesRouter.post("/generate", adminOnly, async (req, res) => {
 
     const {
         department,
@@ -627,6 +631,7 @@ if (!validation.valid) {
 
 timetablesRouter.post(
     "/generate-local",
+    adminOnly,
     async (req, res) => {
 
         try {

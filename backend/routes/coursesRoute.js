@@ -1,6 +1,10 @@
 import { Router } from "express";
 import Course from "../models/course.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 export const coursesRouter = Router();
+
+coursesRouter.use(requireAuth);
+const adminOnly = requireRole("admin");
 
 
 coursesRouter.get("/", async (req, res) => {
@@ -28,7 +32,7 @@ coursesRouter.get("/:id", async (req, res) => {
 });
 
 
-coursesRouter.post("/", async (req, res) => {
+coursesRouter.post("/", adminOnly, async (req, res) => {
   try {
     const course = new Course(req.body);
     await course.save(); 
@@ -40,7 +44,7 @@ coursesRouter.post("/", async (req, res) => {
 });
 
 
-coursesRouter.put("/:id", async (req, res) => {
+coursesRouter.put("/:id", adminOnly, async (req, res) => {
   try {
     const course = await Course.findByIdAndUpdate(req.params.id, req.body, {
       new: true, 
@@ -57,7 +61,7 @@ coursesRouter.put("/:id", async (req, res) => {
 });
 
 
-coursesRouter.delete("/:id", async (req, res) => {
+coursesRouter.delete("/:id", adminOnly, async (req, res) => {
   try {
     const course = await Course.findByIdAndDelete(req.params.id);
     if (!course) {

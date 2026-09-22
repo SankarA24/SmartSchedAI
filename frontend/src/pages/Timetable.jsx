@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react"
-import axios from "axios"
+import api from "@/lib/api"
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,11 +35,6 @@ import { AppShell, PageHeader } from "@/components/AppShell"
 import { StatusBadge } from "@/components/StatusBadge"
 import { GARunSummary } from "@/components/GARunSummary"
 import { statusVariant, courseTypeToken } from "@/lib/status"
-
-const api = axios.create({
-  baseURL: "http://localhost:5000/api",
-  headers: { "Content-Type": "application/json" },
-})
 
 const ADMIN_NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/" },

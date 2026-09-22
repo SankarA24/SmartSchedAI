@@ -12,8 +12,7 @@ import {
   ArrowRight,
   AlertCircle,
 } from "lucide-react";
-
-const API_URL = "http://localhost:5000";
+import api from "@/lib/api";
 
 function Login() {
   const navigate = useNavigate();
@@ -56,24 +55,19 @@ function Login() {
     try {
       setLoading(true);
 
-      const response = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-        email: email.trim(),
-        password,
-        role,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
+      let data;
+      try {
+        const response = await api.post("/auth/login", {
+          email: email.trim(),
+          password,
+          role,
+        });
+        data = response.data;
+      } catch (requestError) {
+        const errData = requestError.response?.data || {};
         throw new Error(
-          data.error ||
-            data.message ||
+          errData.error ||
+            errData.message ||
             "Invalid email or password."
         );
       }

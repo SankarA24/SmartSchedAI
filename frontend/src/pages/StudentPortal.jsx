@@ -14,8 +14,7 @@ import {
   ChevronRight,
   DoorOpen,
 } from "lucide-react";
-
-const API_URL = "http://localhost:5000";
+import api from "@/lib/api";
 
 function StudentPortal() {
   const navigate = useNavigate();
@@ -29,8 +28,6 @@ function StudentPortal() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const token = localStorage.getItem("token");
 
   // ------------------------------------------------------------
   // ID / VALUE HELPERS
@@ -123,19 +120,8 @@ function StudentPortal() {
   // ------------------------------------------------------------
 
   const fetchData = async (url) => {
-    const response = await fetch(`${API_URL}${url}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${url} (${response.status})`);
-    }
-
-    return response.json();
+    const response = await api.get(url.replace(/^\/api/, ""));
+    return response.data;
   };
 
   // ------------------------------------------------------------

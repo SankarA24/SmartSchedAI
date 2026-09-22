@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 
 import {
   LayoutDashboard,
@@ -14,8 +14,6 @@ import {
 } from "lucide-react";
 
 import { Link, useNavigate } from "react-router-dom";
-
-const API_URL = "http://localhost:5000";
 
 export default function FacultyCourses() {
   const navigate = useNavigate();
@@ -47,14 +45,14 @@ export default function FacultyCourses() {
         let facultyData = null;
 
         if (user.facultyId) {
-          const facultyResponse = await axios.get(
-            `${API_URL}/api/faculty/${user.facultyId}`
+          const facultyResponse = await api.get(
+            `/faculty/${user.facultyId}`
           );
 
           facultyData = facultyResponse.data;
         } else if (user.email) {
-          const facultyResponse = await axios.get(
-            `${API_URL}/api/faculty`
+          const facultyResponse = await api.get(
+            `/faculty`
           );
 
           facultyData = facultyResponse.data.find(
@@ -81,9 +79,9 @@ export default function FacultyCourses() {
           coursesResponse,
           notificationsResponse,
         ] = await Promise.all([
-          axios.get(`${API_URL}/api/timetables`),
-          axios.get(`${API_URL}/api/courses`),
-          axios.get(`${API_URL}/api/notifications`),
+          api.get(`/timetables`),
+          api.get(`/courses`),
+          api.get(`/notifications`),
         ]);
 
         setTimetables(timetablesResponse.data || []);

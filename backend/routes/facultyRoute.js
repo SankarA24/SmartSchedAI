@@ -1,7 +1,26 @@
 import { Router } from "express";
 import Faculty from "../models/Faculty.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const facultyRouter = Router();
+
+facultyRouter.use(requireAuth);
+const adminOnly = requireRole("admin");
+
+// Admins may update any faculty record. A faculty user may update
+// only their own record, and then only availability/preferences.
+function allowSelfOrAdmin(req, res, next) {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role === "admin") return next();
+  if (role === "faculty" && req.user?.facultyId && String(req.user.facultyId) === req.params.id) {
+    const { availability, preferences } = req.body || {};
+    req.body = {};
+    if (availability !== undefined) req.body.availability = availability;
+    if (preferences !== undefined) req.body.preferences = preferences;
+    return next();
+  }
+  return res.status(403).json({ error: "You do not have permission to perform this action" });
+}
 
 
 facultyRouter.get("/", async (req, res) => {
@@ -29,7 +48,7 @@ facultyRouter.get("/:id", async (req, res) => {
 });
 
 
-facultyRouter.post("/", async (req, res) => {
+facultyRouter.post("/", adminOnly, async (req, res) => {
   try {
     const facultyMember = new Faculty(req.body);
     await facultyMember.save(); 
@@ -41,7 +60,7 @@ facultyRouter.post("/", async (req, res) => {
 });
 
 
-facultyRouter.put("/:id", async (req, res) => {
+facultyRouter.put("/:id", allowSelfOrAdmin, async (req, res) => {
   try {
     const facultyMember = await Faculty.findByIdAndUpdate(req.params.id, req.body, {
       new: true, 
@@ -58,7 +77,7 @@ facultyRouter.put("/:id", async (req, res) => {
 });
 
 
-facultyRouter.delete("/:id", async (req, res) => {
+facultyRouter.delete("/:id", adminOnly, async (req, res) => {
   try {
     const facultyMember = await Faculty.findByIdAndDelete(req.params.id);
     if (!facultyMember) {

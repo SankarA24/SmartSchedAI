@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const API_URL = "http://localhost:5000";
+import client from "@/lib/api";
 
 /* =========================================================
    HELPERS
@@ -31,28 +30,14 @@ const getId = (value) => {
 };
 
 const api = async (path, options = {}) => {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-
-      ...(token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
-
-      ...(options.headers || {}),
-    },
+  const response = await client.request({
+    url: path.replace(/^\/api/, ""),
+    method: options.method || "GET",
+    data: options.body,
+    headers: options.headers,
   });
 
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json();
+  return response.data;
 };
 
 const unwrap = (data, keys = []) => {

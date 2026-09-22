@@ -1,7 +1,11 @@
 import { Router } from "express";
 import Notification from "../models/Notification.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export const notificationsRouter = Router();
+
+notificationsRouter.use(requireAuth);
+const adminOnly = requireRole("admin");
 
 
 notificationsRouter.get("/", async (req, res) => {
@@ -15,7 +19,7 @@ notificationsRouter.get("/", async (req, res) => {
 });
 
 
-notificationsRouter.post("/", async (req, res) => {
+notificationsRouter.post("/", adminOnly, async (req, res) => {
   try {
     const notification = new Notification(req.body);
     await notification.save(); 
@@ -47,7 +51,7 @@ notificationsRouter.put("/:id/read", async (req, res) => {
 });
 
 
-notificationsRouter.delete("/:id", async (req, res) => {
+notificationsRouter.delete("/:id", adminOnly, async (req, res) => {
   try {
     const notification = await Notification.findByIdAndDelete(req.params.id);
     if (!notification) {

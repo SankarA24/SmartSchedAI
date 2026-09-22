@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:5000";
+import client from "@/lib/api";
 
 const getId = (value) => {
   if (!value) return null;
@@ -11,17 +11,13 @@ const getId = (value) => {
 };
 
 const api = async (path, options = {}) => {
-  const token = localStorage.getItem("token");
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
+  const res = await client.request({
+    url: path.replace(/^\/api/, ""),
+    method: options.method || "GET",
+    data: options.body,
+    headers: options.headers,
   });
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-  return res.json();
+  return res.data;
 };
 
 const unwrap = (data, keys = []) => {

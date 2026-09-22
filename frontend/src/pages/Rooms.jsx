@@ -1,7 +1,7 @@
 
 
 import { useEffect, useState } from "react"
-import axios from "axios"
+import api from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -90,7 +90,7 @@ export default function RoomPage() {
   const fetchRooms = async () => {
     setLoading(true)
     try {
-      const res = await axios.get("http://localhost:5000/api/rooms")
+      const res = await api.get("/rooms")
       setRooms(res.data)
     } catch (error) {
       console.error("Error fetching rooms:", error)
@@ -145,9 +145,9 @@ export default function RoomPage() {
       }
 
       if (editingRoom) {
-        await axios.put(`http://localhost:5000/api/rooms/${editingRoom._id}`, payload)
+        await api.put(`/rooms/${editingRoom._id}`, payload)
       } else {
-        await axios.post("http://localhost:5000/api/rooms", payload)
+        await api.post("/rooms", payload)
       }
 
       resetForm()
@@ -165,7 +165,7 @@ export default function RoomPage() {
     if (!confirm("Are you sure you want to delete this room?")) return
 
     try {
-      await axios.delete(`http://localhost:5000/api/rooms/${id}`)
+      await api.delete(`/rooms/${id}`)
       if (editingRoom && editingRoom._id === id) {
         resetForm()
         setShowForm(false)
