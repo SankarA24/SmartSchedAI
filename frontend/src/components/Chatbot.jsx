@@ -78,6 +78,7 @@ export function Chatbot({ isOpen, onClose, context }) {
           <div key={index} className={`flex items-end gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`prose prose-sm prose-slate max-w-[80%] p-3 rounded-xl ${msg.sender === 'user' ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white prose-invert' : 'bg-slate-100 text-slate-800'}`}>
               {/* Use ReactMarkdown to render the response */}
+              {/* eslint-disable-next-line no-unused-vars -- strip react-markdown's `node` prop before spreading onto <p> */}
               <ReactMarkdown components={{p: ({node, ...props}) => <p className="my-0" {...props} />}}>
                 {msg.text}
               </ReactMarkdown>

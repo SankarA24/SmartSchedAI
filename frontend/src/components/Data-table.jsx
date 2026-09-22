@@ -114,7 +114,7 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
                 </TableCell>
               </TableRow>
             ) : (
-              sortedData.map((item, index) => (
+              sortedData.map((item) => (
                 <TableRow
                   key={item._id}
                   className="border-b border-slate-600/20 hover:bg-slate-700/20 transition-all duration-300 group"

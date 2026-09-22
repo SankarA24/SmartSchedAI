@@ -1,5 +1,5 @@
+import "dotenv/config";
 import express from "express";
-import dotenv from "dotenv";
 import dbConnect from "./utils/dbConnect.js";
 import cors from "cors";
 
@@ -10,8 +10,6 @@ import { timetablesRouter } from "./routes/timetableRoute.js";
 import { aiRouter } from "./routes/aiRoute.js";
 import { notificationsRouter } from "./routes/notificationsRoute.js";
 import { authRouter } from "./routes/authRoute.js";
-
-dotenv.config({ quiet: true });
 
 const app = express();
 

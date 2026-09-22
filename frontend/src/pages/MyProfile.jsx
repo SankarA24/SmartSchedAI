@@ -1,15 +1,5 @@
 const API_URL = "http://localhost:5000";
 
-const getId = (value) => {
-  if (!value) return null;
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  if (value.$oid) return String(value.$oid);
-  if (value._id) return getId(value._id);
-  if (value.id) return getId(value.id);
-  const s = typeof value.toString === "function" ? value.toString() : "";
-  return s && s !== "[object Object]" ? String(s) : null;
-};
-
 const api = async (path, options = {}) => {
   const token = localStorage.getItem("token");
   const res = await fetch(`${API_URL}${path}`, {

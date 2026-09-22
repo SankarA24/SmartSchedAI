@@ -15,52 +15,16 @@ import {
 import {
     generateLocalTimetable
 } from "../utils/localScheduler.js";
+import {
+    DAYS,
+    TIME_SLOTS,
+    slotLabel
+} from "../utils/schedulingConstants.js";
+import {
+    getWeeklySessions
+} from "../utils/schedulingHelpers.js";
 
 export const timetablesRouter = Router();
-
-
-// =======================================================
-// CONFIGURATION
-// =======================================================
-
-const DAYS = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-];
-
-const TIME_SLOTS = [
-    "09:00-10:00",
-    "10:00-11:00",
-    "11:15-12:15",
-    "14:15-15:15",
-    "15:15-16:15",
-    "16:30-17:30",
-];
-
-const WEEKS = 13;
-
-
-// =======================================================
-// WEEKLY SESSION CALCULATION
-// Same logic used by AI scheduler
-// =======================================================
-
-function getWeeklySessions(course) {
-
-    if (
-        course.totalHours &&
-        Number(course.totalHours) > 0
-    ) {
-        return Math.ceil(
-            Number(course.totalHours) / WEEKS
-        );
-    }
-
-    return Number(course.hoursPerWeek) || 3;
-}
 
 
 // =======================================================
@@ -415,7 +379,7 @@ timetablesRouter.post("/generate", async (req, res) => {
                     DAYS,
 
                 timeSlots:
-                    TIME_SLOTS,
+                    TIME_SLOTS.map(slotLabel),
 
                 getWeeklySessions:
                     getWeeklySessions
@@ -833,7 +797,7 @@ timetablesRouter.post(
                     faculty,
                     rooms,
                     days: DAYS,
-                    timeSlots: TIME_SLOTS,
+                    timeSlots: TIME_SLOTS.map(slotLabel),
                     getWeeklySessions
                 });
 
