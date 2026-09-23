@@ -118,7 +118,7 @@ async function main() {
             console.log("--no-labs: lab rooms rewritten to lecture_hall in memory.");
         }
 
-        const { schedule, stats } = generateGeneticTimetable({
+        const { schedule, stats } = await generateGeneticTimetable({
             courses: context.courses,
             faculty: context.faculty,
             rooms,

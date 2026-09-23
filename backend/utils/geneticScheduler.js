@@ -22,6 +22,13 @@
 // One faculty member per course is therefore guaranteed by
 // construction; every other rule is enforced through fitness.
 //
+// The run is asynchronous: every `progressEvery` generations it
+// reports progress through the optional onProgress callback and
+// yields the event loop with setImmediate, so an HTTP server
+// stays responsive while it evolves. Yielding changes only WHEN
+// the work happens, never the ORDER of the random draws, so the
+// same seed still gives the same timetable.
+//
 // Fitness = 1 / (1 + 10 * hard + soft), where `hard` counts the
 // violations of hard constraints (clashes, availability,
 // workload, duplicate slots) and `soft` sums preference
@@ -757,6 +764,16 @@ function compareByFitness(a, b) {
 }
 
 
+/**
+ * Hand control back to the event loop so a long run does not
+ * block the HTTP server. Draws no random numbers, so the RNG
+ * stream is exactly what a synchronous run would produce.
+ */
+function yieldToEventLoop() {
+    return new Promise((resolve) => setImmediate(resolve));
+}
+
+
 // -------------------------------------------------------
 // Decoding
 // -------------------------------------------------------
@@ -806,14 +823,19 @@ function decode(chromosome, problem) {
  * @param {object} [params.options] GA tunables (see DEFAULTS)
  * @param {object} [params.grid] scheduling grid; defaults to
  *        DEFAULT_GRID, i.e. today's days and slots
- * @returns {{schedule: Array, stats: object}}
+ * @param {Function} [params.onProgress] optional async callback
+ *        invoked every `progressEvery` generations with
+ *        {generation, maxGenerations, bestFitness, hard, soft,
+ *        elapsedMs}
+ * @returns {Promise<{schedule: Array, stats: object}>}
  */
-export function generateGeneticTimetable({
+export async function generateGeneticTimetable({
     courses = [],
     faculty = [],
     rooms = [],
     options = {},
     grid = DEFAULT_GRID,
+    onProgress,
 } = {}) {
 
     if (
@@ -853,6 +875,13 @@ export function generateGeneticTimetable({
 
     const rng = createRng(seed);
 
+    // How often progress is reported and the event loop is
+    // yielded: about 50 times over a full run.
+    const progressEvery = Math.max(
+        1,
+        Math.floor(settings.maxGenerations / 50)
+    );
+
     const problem = buildProblem({ courses, faculty, rooms, grid });
 
     const warnings = problem.warnings.slice();
@@ -886,6 +915,10 @@ export function generateGeneticTimetable({
             chromosome,
             score: evaluate(chromosome, problem),
         });
+
+        if ((i + 1) % progressEvery === 0) {
+            await yieldToEventLoop();
+        }
     }
 
     population.sort(compareByFitness);
@@ -973,6 +1006,22 @@ export function generateGeneticTimetable({
             stallGenerations = 0;
         } else {
             stallGenerations += 1;
+        }
+
+        if (generations % progressEvery === 0) {
+
+            if (onProgress) {
+                await onProgress({
+                    generation: generations,
+                    maxGenerations: settings.maxGenerations,
+                    bestFitness: best.score.fitness,
+                    hard: best.score.hard,
+                    soft: best.score.soft,
+                    elapsedMs: Date.now() - startedAt,
+                });
+            }
+
+            await yieldToEventLoop();
         }
 
         if (

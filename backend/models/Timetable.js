@@ -40,6 +40,20 @@ const TimetableSchema = new mongoose.Schema(
         type: { type: String, required: true },
         message: { type: String, required: true },
         entries: [{ type: String }],
+        severity: { type: String, enum: ["low", "medium", "high", "critical"], default: "medium" },
+        resolved: { type: Boolean, default: false },
+        resolvedBy: { type: String },
+        resolvedAt: { type: Date },
+        resolutionNote: { type: String },
+      },
+    ],
+    comments: [
+      {
+        userId: { type: String },
+        name: { type: String },
+        role: { type: String },
+        text: { type: String },
+        createdAt: { type: Date },
       },
     ],
     metadata: {
@@ -54,6 +68,14 @@ const TimetableSchema = new mongoose.Schema(
       hardViolations: { type: Number },
       softPenalty: { type: Number },
       fitnessHistory: [FitnessHistoryEntrySchema],
+      qualityScore: { type: Number },
+      qualityBreakdown: {
+        constraintCompliance: { type: Number },
+        roomUtilization: { type: Number },
+        facultyBalance: { type: Number },
+        studentConvenience: { type: Number },
+      },
+      jobId: { type: String },
     },
   },
   { timestamps: true }
