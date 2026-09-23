@@ -4,10 +4,22 @@ import { useState } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/common/EmptyState"
 import { Search, Filter, MoreHorizontal } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
-export function DataTable({ data, columns, searchKey, loading = false, onEdit, onDelete, onView }) {
+export function DataTable({
+  data,
+  columns,
+  searchKey,
+  loading = false,
+  onEdit,
+  onDelete,
+  onView,
+  entityName = "courses",
+  empty,
+}) {
   const [searchTerm, setSearchTerm] = useState("")
   const [sortColumn, setSortColumn] = useState(null)
   const [sortDirection, setSortDirection] = useState("asc")
@@ -39,13 +51,13 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="h-12 bg-gradient-to-r from-slate-800/40 to-slate-700/40 backdrop-blur-sm animate-pulse rounded-xl border border-slate-600/30" />
-        <div className="space-y-3">
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-12 w-full max-w-sm rounded-xl" />
+          <Skeleton className="h-12 w-28 rounded-xl" />
+        </div>
+        <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
           {[...Array(5)].map((_, i) => (
-            <div
-              key={i}
-              className="h-16 bg-gradient-to-r from-slate-800/30 to-slate-700/30 backdrop-blur-sm animate-pulse rounded-xl border border-slate-600/20"
-            />
+            <Skeleton key={i} className="h-12 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -56,40 +68,40 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-cyan-400/70" />
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
-            placeholder="Search courses..."
+            placeholder={`Search ${entityName}...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-12 h-12 bg-slate-800/40 backdrop-blur-sm border-slate-600/30 text-slate-100 placeholder:text-slate-400 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20 rounded-xl transition-all duration-300 hover:bg-slate-800/50"
+            className="pl-12 h-12 rounded-xl"
           />
         </div>
         <Button
           variant="outline"
           size="sm"
-          className="h-12 px-6 bg-slate-800/40 backdrop-blur-sm border-slate-600/30 text-slate-300 hover:bg-slate-700/50 hover:border-cyan-400/50 hover:text-cyan-300 rounded-xl transition-all duration-300"
+          className="h-12 px-6 rounded-xl"
         >
           <Filter className="h-4 w-4 mr-2" />
           Filter
         </Button>
       </div>
 
-      <div className="rounded-2xl border border-slate-600/30 bg-slate-800/20 backdrop-blur-sm overflow-hidden shadow-2xl">
+      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
         <Table>
           <TableHeader>
-            <TableRow className="border-b border-slate-600/30 hover:bg-slate-700/20">
+            <TableRow>
               {columns.map((column) => (
                 <TableHead
                   key={column.key}
-                  className={`text-cyan-300 font-semibold py-4 px-6 ${
-                    column.sortable ? "cursor-pointer hover:bg-slate-700/30 transition-all duration-300" : ""
+                  className={`text-muted-foreground font-semibold py-4 px-6 ${
+                    column.sortable ? "cursor-pointer transition-colors" : ""
                   }`}
                   onClick={() => column.sortable && handleSort(column.key)}
                 >
                   <div className="flex items-center gap-2">
                     {column.label}
                     {column.sortable && sortColumn === column.key && (
-                      <span className="text-cyan-400 font-bold text-sm animate-pulse">
+                      <span className="text-primary font-bold text-sm">
                         {sortDirection === "asc" ? "↑" : "↓"}
                       </span>
                     )}
@@ -97,32 +109,37 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
                 </TableHead>
               ))}
               {(onEdit || onDelete || onView) && (
-                <TableHead className="w-[80px] text-cyan-300 font-semibold py-4 px-6">Actions</TableHead>
+                <TableHead className="w-[80px] text-muted-foreground font-semibold py-4 px-6">Actions</TableHead>
               )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length + 1} className="text-center py-16 text-slate-400 bg-slate-800/10">
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-slate-700/50 to-slate-800/50 flex items-center justify-center">
-                      <Search className="w-8 h-8 text-slate-500" />
-                    </div>
-                    <p className="text-lg">No courses found</p>
-                  </div>
+                <TableCell colSpan={columns.length + 1} className="py-4 px-6">
+                  {empty ? (
+                    <EmptyState {...empty} />
+                  ) : (
+                    <EmptyState
+                      icon={Search}
+                      title={`No ${entityName} found`}
+                      description={
+                        searchTerm ? `No results for "${searchTerm}".` : undefined
+                      }
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ) : (
               sortedData.map((item) => (
                 <TableRow
                   key={item._id}
-                  className="border-b border-slate-600/20 hover:bg-slate-700/20 transition-all duration-300 group"
+                  className="group"
                 >
                   {columns.map((column) => (
                     <TableCell
                       key={column.key}
-                      className="py-4 px-6 text-slate-200 group-hover:text-slate-100 transition-colors duration-300"
+                      className="py-4 px-6 text-foreground transition-colors"
                     >
                       {column.render ? column.render(item) : String(item[column.key] || "")}
                     </TableCell>
@@ -134,19 +151,19 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-10 w-10 p-0 text-slate-400 hover:text-cyan-300 hover:bg-slate-700/50 rounded-xl transition-all duration-300 hover:scale-110"
+                            className="h-10 w-10 p-0 text-muted-foreground hover:text-foreground rounded-xl transition-colors"
                           >
                             <MoreHorizontal className="h-5 w-5" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                           align="end"
-                          className="bg-slate-800/90 backdrop-blur-sm border-slate-600/30 text-slate-200 rounded-xl shadow-2xl"
+                          className="rounded-xl"
                         >
                           {onView && (
                             <DropdownMenuItem
                               onClick={() => onView(item)}
-                              className="hover:bg-slate-700/50 hover:text-cyan-300 transition-colors duration-300 rounded-lg"
+                              className="rounded-lg"
                             >
                               View
                             </DropdownMenuItem>
@@ -154,7 +171,7 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
                           {onEdit && (
                             <DropdownMenuItem
                               onClick={() => onEdit(item)}
-                              className="hover:bg-slate-700/50 hover:text-cyan-300 transition-colors duration-300 rounded-lg"
+                              className="rounded-lg"
                             >
                               Edit
                             </DropdownMenuItem>
@@ -162,7 +179,7 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
                           {onDelete && (
                             <DropdownMenuItem
                               onClick={() => onDelete(item)}
-                              className="text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors duration-300 rounded-lg"
+                              className="text-destructive focus:text-destructive rounded-lg"
                             >
                               Delete
                             </DropdownMenuItem>
@@ -179,13 +196,13 @@ export function DataTable({ data, columns, searchKey, loading = false, onEdit, o
       </div>
 
       <div className="flex items-center justify-between text-sm">
-        <div className="text-slate-400 bg-slate-800/20 backdrop-blur-sm px-4 py-2 rounded-xl border border-slate-600/20">
-          Showing <span className="text-cyan-400 font-semibold">{sortedData.length}</span> of{" "}
-          <span className="text-cyan-400 font-semibold">{data.length}</span> courses
+        <div className="text-muted-foreground bg-card px-4 py-2 rounded-xl border border-border">
+          Showing <span className="text-primary font-semibold">{sortedData.length}</span> of{" "}
+          <span className="text-primary font-semibold">{data.length}</span> {entityName}
           {searchTerm && (
-            <span className="text-slate-300">
+            <span className="text-foreground">
               {" "}
-              for "<span className="text-cyan-300 font-medium">{searchTerm}</span>"
+              for "<span className="text-primary font-medium">{searchTerm}</span>"
             </span>
           )}
         </div>

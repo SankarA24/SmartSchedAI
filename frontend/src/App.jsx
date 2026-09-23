@@ -23,6 +23,8 @@ import MyCourses from "./pages/MyCourses";
 import StudentNotifications from "./pages/StudentNotifications";
 import MyProfile from "./pages/MyProfile";
 
+import { SystemConfigProvider } from "./hooks/useSystemConfig";
+
 
 // =====================================================
 // CHECK LOGIN
@@ -105,7 +107,8 @@ const ProtectedRoute = ({ children, role }) => {
     return <Navigate to={getRoleHome(user)} replace />;
   }
 
-  return children;
+  // Only authenticated routes need the scheduling grid; /login stays outside.
+  return <SystemConfigProvider>{children}</SystemConfigProvider>;
 };
 
 
