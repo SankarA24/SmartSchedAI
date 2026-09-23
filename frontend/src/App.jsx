@@ -9,6 +9,12 @@ import RoomPage from "./pages/Rooms";
 import TimetablePage from "./pages/Timetable";
 import NotificationsPage from "./pages/Notifications";
 
+import GenerateTimetable from "./pages/GenerateTimetable";
+import CreateTimetable from "./pages/CreateTimetable";
+import InfrastructurePage from "./pages/Infrastructure";
+import ViewTimetable from "./pages/ViewTimetable";
+import ViewTimetableDetail from "./pages/ViewTimetableDetail";
+
 import Login from "./pages/Login";
 
 import FacultyPortal from "./pages/FacultyPortal";
@@ -216,8 +222,16 @@ function App() {
           }
         />
 
+        {/* Migrated to /view-timetable; alias kept so old links keep working. */}
         <Route
           path="/timetables"
+          element={<Navigate to="/view-timetable" replace />}
+        />
+
+        {/* Legacy shell, reachable for one phase so the migration is
+            revertible. Deleted in U10. */}
+        <Route
+          path="/timetables-legacy"
           element={
             <ProtectedRoute role="admin">
               <TimetablePage />
@@ -230,6 +244,51 @@ function App() {
           element={
             <ProtectedRoute role="admin">
               <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/create-timetable"
+          element={
+            <ProtectedRoute role="admin">
+              <CreateTimetable />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/generate-timetable"
+          element={
+            <ProtectedRoute role="admin">
+              <GenerateTimetable />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/infrastructure"
+          element={
+            <ProtectedRoute role="admin">
+              <InfrastructurePage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/view-timetable"
+          element={
+            <ProtectedRoute role="admin">
+              <ViewTimetable />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/view-timetable/:id"
+          element={
+            <ProtectedRoute role="admin">
+              <ViewTimetableDetail />
             </ProtectedRoute>
           }
         />

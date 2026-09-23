@@ -5,7 +5,7 @@ import Course from "../models/course.js";
 import Faculty from "../models/Faculty.js";
 import Room from "../models/Room.js";
 import Timetable from "../models/Timetable.js";
-import Notification from "../models/Notification.js";
+import { createAndEmit } from "./notify.js";
 import dotenv from "dotenv";
 import { DEFAULT_GRID } from "./schedulingConstants.js";
 import { getWeeklySessions } from "./schedulingHelpers.js";
@@ -1250,8 +1250,15 @@ Generate the complete timetable now.
 export async function generateTimetableWithAI(
     request,
     context = null,
-    grid = DEFAULT_GRID
+    grid = DEFAULT_GRID,
+    app = null
 ) {
+
+    // The express app (for `app.get("io")`), threaded in by the caller
+    // (routes/timetableRoute.js) so this path's notifications are pushed
+    // live like every other one's. createAndEmit tolerates null, so a
+    // caller that has no app still generates, it just does not emit.
+    const notifyApp = app || null;
 
     console.log(
         "=== STARTING AI TIMETABLE GENERATION ==="
@@ -1808,7 +1815,7 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
         // Success notification
         // ---------------------------------------------------
 
-        await new Notification({
+        await createAndEmit(notifyApp, {
 
             title:
                 "AI Timetable Generated",
@@ -1819,7 +1826,13 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
             type:
                 "success",
 
-        }).save();
+            audience:
+                "admin",
+
+            relatedTimetableId:
+                created._id,
+
+        });
 
 
         return created;
@@ -1839,7 +1852,7 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
 
         try {
 
-            await new Notification({
+            await createAndEmit(notifyApp, {
 
                 title:
                     "Timetable Generation Failed",
@@ -1851,7 +1864,10 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
                 type:
                     "error",
 
-            }).save();
+                audience:
+                    "admin",
+
+            });
 
         } catch (
             notificationError
