@@ -94,13 +94,16 @@ import {useNavigate} from "react-router-dom";
 function Notifications(){
  const navigate=useNavigate(),[user]=useState(userFromStorage),[items,setItems]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
  useEffect(()=>{if(!user){navigate("/login");return;}(async()=>{try{const d=await api("/api/notifications");setItems(unwrap(d,["notifications","data","results"]));}catch(e){console.error(e);setError("Unable to load notifications.");}finally{setLoading(false);}})();},[user,navigate]);
- const unread=items.filter(n=>n.read===false||n.isRead===false||n.status==="unread").length;
+ // No "mark as read" action here: Notification.isRead is a single global flag
+ // (no recipient/readBy field) and PUT /api/notifications/:id/read has no owner
+ // check, so a student marking one read would hide it for every user.
+ const unread=items.filter(n=>!n.isRead).length;
  if(loading)return <div style={styles.loading}>Loading notifications...</div>;
  return <Page active="/student-portal/notifications" navigate={navigate} count={unread||items.length}>
   <div style={styles.header}><div><h1 style={styles.title}>Notifications</h1><p style={styles.subtitle}>Important updates and announcements</p></div><button style={styles.button} onClick={()=>navigate("/student-portal")}>Dashboard →</button></div>
   {error&&<div style={styles.error}>{error}</div>}
   <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>All Notifications</h2><p style={styles.muted}>{unread} unread</p></div></div><div style={styles.content}>
-   {items.length?items.map((n,i)=>{const isUnread=n.read===false||n.isRead===false||n.status==="unread";return <div key={getId(n._id||n.id)||i} style={{...styles.notification,...(isUnread?styles.unread:{})}}>
+   {items.length?items.map((n,i)=>{const isUnread=!n.isRead;return <div key={getId(n._id||n.id)||i} style={{...styles.notification,...(isUnread?styles.unread:{})}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:12}}><strong>{n.title||n.subject||n.type||"Notification"}</strong>{isUnread&&<span style={styles.badge}>NEW</span>}</div>
     <p style={{color:"#c7cbe3",lineHeight:1.6,margin:"9px 0 5px"}}>{n.message||n.content||n.description||"No message available."}</p>
     {(n.createdAt||n.date)&&<small style={styles.muted}>{new Date(n.createdAt||n.date).toLocaleString()}</small>}

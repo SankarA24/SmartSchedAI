@@ -51,6 +51,9 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -93,6 +96,9 @@
   --chart-3: oklch(0.527 0.101 79.1);
   --chart-4: oklch(0.508 0.101 279.4);
   --chart-5: oklch(0.5 0.065 205.2);
+  --chart-6: oklch(0.519 0.131 329.7);
+  --chart-7: oklch(0.517 0.105 39.6);
+  --chart-8: oklch(0.508 0.101 119.4);
 
   --sidebar: oklch(0.976 0.003 264.5);
   --sidebar-foreground: oklch(0.23 0.012 264.3);
@@ -135,6 +141,9 @@
   --chart-3: oklch(0.713 0.111 79.4);
   --chart-4: oklch(0.669 0.083 281.5);
   --chart-5: oklch(0.732 0.055 203.5);
+  --chart-6: oklch(0.686 0.114 328.7);
+  --chart-7: oklch(0.668 0.108 41.1);
+  --chart-8: oklch(0.669 0.083 121.5);
 
   --sidebar: oklch(0.203 0.018 259.7);
   --sidebar-foreground: oklch(0.936 0.009 264.5);
@@ -222,5 +231,14 @@
   a {
     text-decoration: none;
     color: inherit;
+  }
+  .print-table th,
+  .print-table td {
+    padding: 4px 6px;
+    font-size: 10pt;
+  }
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
   }
 }
