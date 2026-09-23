@@ -22,6 +22,8 @@ import {
   Check,
   UserCog,
   GraduationCap,
+  MessageSquare,
+  Send,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 
@@ -40,6 +42,15 @@ export default function NotificationsPage() {
     priority: "low",
   })
 
+  // Queries raised by faculty and students. GET /api/queries returns every
+  // row for an admin (scopeFilter in backend/routes/queriesRoute.js); the
+  // authors themselves only ever get their own.
+  const [queries, setQueries] = useState([])
+  const [queriesLoading, setQueriesLoading] = useState(true)
+  const [queriesError, setQueriesError] = useState("")
+  const [replyDrafts, setReplyDrafts] = useState({})
+  const [replyingId, setReplyingId] = useState(null)
+
   const resetForm = () => {
     setFormData({ title: "", message: "", type: "info", priority: "low" })
   }
@@ -57,9 +68,49 @@ export default function NotificationsPage() {
     }
   }
 
+  const fetchQueries = async () => {
+    setQueriesLoading(true)
+    try {
+      const res = await api.get("/queries")
+      setQueries(
+        Array.isArray(res.data)
+          ? res.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          : []
+      )
+      setQueriesError("")
+    } catch (error) {
+      console.error("Error fetching queries:", error)
+      setQueries([])
+      setQueriesError("Unable to load queries.")
+    } finally {
+      setQueriesLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchNotifications()
+    fetchQueries()
   }, [])
+
+  // The reply is delivered to the author alone: the route addresses the
+  // notification by recipientUserId only, never by role audience.
+  const handleReply = async (id) => {
+    const reply = (replyDrafts[id] || "").trim()
+    if (!reply) return
+    setReplyingId(id)
+    try {
+      const res = await api.put(`/queries/${id}/reply`, { reply })
+      const updated = res.data
+      setQueries((prev) => prev.map((q) => (q._id === id ? { ...q, ...updated } : q)))
+      setReplyDrafts((prev) => ({ ...prev, [id]: "" }))
+      setQueriesError("")
+    } catch (error) {
+      console.error("Error replying to query:", error)
+      setQueriesError(error?.response?.data?.error || "Unable to send that reply.")
+    } finally {
+      setReplyingId(null)
+    }
+  }
 
   const handleSubmitNotification = async (e) => {
     e.preventDefault()
@@ -160,6 +211,7 @@ export default function NotificationsPage() {
   }
 
   const unreadCount = notifications.filter((n) => !n.isRead).length
+  const openQueryCount = queries.filter((q) => q.status !== "answered").length
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
@@ -334,6 +386,116 @@ export default function NotificationsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Queries raised by faculty and students. Answering one is the only
+            way a query leaves status "open" — PUT /api/queries/:id/reply had
+            no caller before this. The reply notification goes to the author
+            alone (recipientUserId, no role audience), so no other faculty
+            member or student ever reads the subject or the answer. */}
+        <Card className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 shadow-2xl shadow-cyan-500/10">
+          <CardHeader className="border-b border-slate-700/50 p-6">
+            <div className="space-y-2">
+              <CardTitle className="flex items-center gap-3 text-xl font-semibold text-cyan-100">
+                <div className="p-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl border border-purple-400/30 backdrop-blur-sm">
+                  <MessageSquare className="h-5 w-5 text-purple-300" />
+                </div>
+                Queries
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                {queries.length} total. {openQueryCount} awaiting a reply.
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            {queriesError && (
+              <p className="mb-4 text-sm text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg p-3">
+                {queriesError}
+              </p>
+            )}
+            {queriesLoading ? (
+              <p className="text-center text-slate-400 py-10">Loading queries...</p>
+            ) : queries.length === 0 ? (
+              <div className="text-center py-10">
+                <MessageSquare className="mx-auto h-12 w-12 text-slate-600" />
+                <h3 className="mt-2 text-sm font-medium text-slate-300">No queries raised</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Faculty and students can raise a query from their portal.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {queries.map((q) => {
+                  const answered = q.status === "answered"
+                  return (
+                    <div
+                      key={q._id}
+                      className={`p-4 rounded-lg border backdrop-blur-sm transition-all duration-300 ${
+                        answered
+                          ? "bg-slate-800/40 border-slate-700/50"
+                          : "bg-purple-500/10 border-purple-400/30 border-l-4 border-l-purple-400"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <p className={`font-semibold ${answered ? "text-slate-400" : "text-slate-100"}`}>
+                              {q.subject}
+                            </p>
+                            <Badge variant="outline" className="bg-slate-600/20 text-slate-300 border-slate-500/30 capitalize">
+                              {q.role}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className={
+                                answered
+                                  ? "bg-green-500/20 text-green-300 border-green-500/30 capitalize"
+                                  : "bg-yellow-500/20 text-yellow-300 border-yellow-500/30 capitalize"
+                              }
+                            >
+                              {q.status}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-slate-400">{q.message}</p>
+                          <p className="text-xs text-slate-500 mt-2">
+                            {q.name} &middot; {q.createdAt ? new Date(q.createdAt).toLocaleString() : ""}
+                          </p>
+                        </div>
+                      </div>
+
+                      {answered ? (
+                        <div className="mt-3 rounded-md border border-slate-700 bg-slate-900/50 p-3">
+                          <p className="text-xs font-medium text-slate-400 mb-1">Your reply</p>
+                          <p className="text-sm text-slate-300">{q.reply}</p>
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          <Label className="text-slate-300 font-medium">Reply</Label>
+                          <Textarea
+                            value={replyDrafts[q._id] || ""}
+                            onChange={(e) =>
+                              setReplyDrafts((prev) => ({ ...prev, [q._id]: e.target.value }))
+                            }
+                            placeholder="Write your answer to this query..."
+                            className="bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 focus:ring-cyan-500/20 text-slate-200 placeholder-slate-500 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70"
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => handleReply(q._id)}
+                            disabled={replyingId === q._id || !(replyDrafts[q._id] || "").trim()}
+                            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/25 transition-all duration-300 border border-cyan-500/30 backdrop-blur-sm flex items-center gap-2"
+                          >
+                            <Send className="h-4 w-4" />
+                            {replyingId === q._id ? "Sending..." : "Send Reply"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardContent>

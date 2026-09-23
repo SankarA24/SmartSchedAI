@@ -9,20 +9,31 @@ notificationsRouter.use(requireAuth);
 const adminOnly = requireRole("admin");
 
 
-// Only the notifications this caller is allowed to see: the global ones,
-// the ones addressed to their role, and the ones addressed to them.
+// Only the notifications this caller is allowed to see.
+//
+// `recipientUserId` is EXCLUSIVE, not additive: a notification addressed to
+// one user is readable by that user and by nobody else. The earlier version
+// of this filter ORed a bare `{audience: role}` clause alongside the
+// recipient clause, so a private notification carrying, say, an admin's
+// answer to one faculty member's query still matched for every other faculty
+// member. The two clauses below are therefore mutually exclusive:
+//
+//   1. addressed to me      -> recipientUserId === my user id
+//   2. a broadcast          -> no recipient at all, and an audience of
+//                              "all" or of my own role
+//
+// Clause 2 also matches documents written before `recipientUserId` existed,
+// because Mongo's `field: null` matches a missing field as well as a null one.
 function audienceFilter(user) {
   const role = String(user?.role || "").toLowerCase();
-  const or = [{ audience: "all" }];
+  const audiences = role ? ["all", role] : ["all"];
+  const broadcast = { recipientUserId: null, audience: { $in: audiences } };
 
-  if (role) {
-    or.push({ audience: role });
-  }
-  if (user?.userId) {
-    or.push({ recipientUserId: String(user.userId) });
+  if (!user?.userId) {
+    return broadcast;
   }
 
-  return { $or: or };
+  return { $or: [{ recipientUserId: String(user.userId) }, broadcast] };
 }
 
 

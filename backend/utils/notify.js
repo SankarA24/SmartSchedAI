@@ -17,8 +17,13 @@ const ROLE_ROOMS = ["admin", "faculty", "student"];
 /**
  * Saves a notification and, when a socket.io instance is available on the
  * Express app (`app.set("io", io)`), emits it as a "notification" event to:
- *   - `role:<audience>`, or every role room when audience is "all";
- *   - `user:<recipientUserId>` when the notification targets one user.
+ *   - `user:<recipientUserId>` ALONE when the notification targets one user;
+ *   - otherwise `role:<audience>`, or every role room when audience is "all".
+ *
+ * The live push mirrors the read filter in routes/notificationsRoute.js: a
+ * notification with a recipient is private to that recipient, so it must not
+ * also be fanned out to the whole role room (which used to hand every faculty
+ * member the admin's private answer to one colleague's query).
  *
  * `app` may be null/undefined and `io` may be missing, so scripts and the
  * local schedulers can use this without an HTTP server running.
@@ -53,14 +58,13 @@ export async function createAndEmit(
     return notification;
   }
 
-  const rooms =
-    notification.audience === "all"
+  // A recipient makes the notification private: emit to that one user's room
+  // and to no role room at all.
+  const rooms = notification.recipientUserId
+    ? [`user:${notification.recipientUserId}`]
+    : notification.audience === "all"
       ? ROLE_ROOMS.map((role) => `role:${role}`)
       : [`role:${notification.audience}`];
-
-  if (notification.recipientUserId) {
-    rooms.push(`user:${notification.recipientUserId}`);
-  }
 
   const event = notification.toObject ? notification.toObject() : notification;
 
