@@ -12,9 +12,7 @@
 // preferences land in `warnings` (the timetable is still usable).
 
 import {
-    DAYS,
-    TIME_SLOTS,
-    BREAK_SLOT,
+    DEFAULT_GRID,
 } from "./schedulingConstants.js";
 
 import {
@@ -52,13 +50,16 @@ function indexById(items) {
  * @param {Array} relevantCourses courses the timetable must cover
  * @param {Array} relevantFaculty faculty that may be assigned
  * @param {Array} allRooms rooms that may be used
+ * @param {object} [grid] the configured grid; defaults to today's
+ *                        hard-coded days, slots and break
  * @returns {{valid: boolean, errors: string[], warnings: string[]}}
  */
 export function validateSchedule(
     schedule,
     relevantCourses,
     relevantFaculty,
-    allRooms
+    allRooms,
+    grid = DEFAULT_GRID
 ) {
 
     const errors = [];
@@ -128,7 +129,7 @@ export function validateSchedule(
 
     for (const entry of schedule) {
 
-        if (!DAYS.includes(entry.day)) {
+        if (!grid.days.includes(entry.day)) {
 
             errors.push(
                 `Invalid day "${entry.day}"`
@@ -144,7 +145,7 @@ export function validateSchedule(
     for (const entry of schedule) {
 
         const validSlot =
-            TIME_SLOTS.some(
+            grid.slots.some(
                 (slot) =>
                     slot.start === entry.startTime &&
                     slot.end === entry.endTime
@@ -165,18 +166,21 @@ export function validateSchedule(
 
     for (const entry of schedule) {
 
-        if (
-            timeOverlaps(
-                entry.startTime,
-                entry.endTime,
-                BREAK_SLOT.start,
-                BREAK_SLOT.end
-            )
-        ) {
+        for (const breakSlot of grid.breaks) {
 
-            errors.push(
-                `Entry on ${entry.day} ${entry.startTime}-${entry.endTime} overlaps the protected break (${BREAK_SLOT.start}-${BREAK_SLOT.end})`
-            );
+            if (
+                timeOverlaps(
+                    entry.startTime,
+                    entry.endTime,
+                    breakSlot.start,
+                    breakSlot.end
+                )
+            ) {
+
+                errors.push(
+                    `Entry on ${entry.day} ${entry.startTime}-${entry.endTime} overlaps the protected break (${breakSlot.start}-${breakSlot.end})`
+                );
+            }
         }
     }
 

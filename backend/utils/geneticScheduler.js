@@ -9,6 +9,12 @@
 // solely for the wall-clock time limit (and the duration that
 // the same clock reading gives us for free).
 //
+// The grid (working days and teaching slots) is not hard-coded:
+// it is handed in by the caller and defaults to DEFAULT_GRID,
+// which is built from the same DAYS/TIME_SLOTS this module used
+// to read directly. It is carried on `problem.grid` so every
+// inner helper works from one agreed grid.
+//
 // Chromosome layout (one per individual):
 //   facultyGene[courseIdx]            -> index into eligibleFaculty
 //   sessionGenes[courseIdx][session]  -> { dayIdx, slotIdx, roomIdx }
@@ -24,10 +30,7 @@
 
 import { createRng } from "./prng.js";
 
-import {
-    DAYS,
-    TIME_SLOTS,
-} from "./schedulingConstants.js";
+import { DEFAULT_GRID } from "./schedulingConstants.js";
 
 import {
     getWeeklySessions,
@@ -182,21 +185,27 @@ function resolveOptions(options = {}) {
 /**
  * Availability of one entity for every (day, slot) cell of the
  * grid, as a flat boolean array indexed by cellIndex.
+ *
+ * @param {object} entity faculty or room document
+ * @param {{days: string[], slots: Array<{start: string, end: string}>}} grid
  */
-function buildAvailabilityMask(entity) {
+function buildAvailabilityMask(entity, grid) {
 
-    const mask = new Array(DAYS.length * TIME_SLOTS.length);
+    const days = grid.days;
+    const slots = grid.slots;
 
-    for (let d = 0; d < DAYS.length; d++) {
+    const mask = new Array(days.length * slots.length);
 
-        for (let s = 0; s < TIME_SLOTS.length; s++) {
+    for (let d = 0; d < days.length; d++) {
 
-            mask[d * TIME_SLOTS.length + s] =
+        for (let s = 0; s < slots.length; s++) {
+
+            mask[d * slots.length + s] =
                 isWithinAvailability(
                     entity,
-                    DAYS[d],
-                    TIME_SLOTS[s].start,
-                    TIME_SLOTS[s].end
+                    days[d],
+                    slots[s].start,
+                    slots[s].end
                 );
         }
     }
@@ -207,17 +216,23 @@ function buildAvailabilityMask(entity) {
 
 /**
  * Preference weight of one faculty member for every cell.
+ *
+ * @param {object} facultyMember
+ * @param {{days: string[], slots: Array<{start: string, end: string}>}} grid
  */
-function buildPreferenceMask(facultyMember) {
+function buildPreferenceMask(facultyMember, grid) {
 
-    const mask = new Array(DAYS.length * TIME_SLOTS.length);
+    const days = grid.days;
+    const slots = grid.slots;
 
-    for (let d = 0; d < DAYS.length; d++) {
+    const mask = new Array(days.length * slots.length);
 
-        for (let s = 0; s < TIME_SLOTS.length; s++) {
+    for (let d = 0; d < days.length; d++) {
 
-            const day = DAYS[d];
-            const slot = TIME_SLOTS[s];
+        for (let s = 0; s < slots.length; s++) {
+
+            const day = days[d];
+            const slot = slots[s];
 
             let weight = 0;
 
@@ -243,7 +258,7 @@ function buildPreferenceMask(facultyMember) {
                 weight += SOFT_PREFERRED;
             }
 
-            mask[d * TIME_SLOTS.length + s] = weight;
+            mask[d * slots.length + s] = weight;
         }
     }
 
@@ -253,8 +268,10 @@ function buildPreferenceMask(facultyMember) {
 
 /**
  * Everything the GA needs about the problem, computed once.
+ * The grid travels on the returned object so every helper that
+ * receives a problem works from the same days and slots.
  */
-function buildProblem({ courses, faculty, rooms }) {
+function buildProblem({ courses, faculty, rooms, grid }) {
 
     const warnings = [];
 
@@ -269,8 +286,8 @@ function buildProblem({ courses, faculty, rooms }) {
             maxHours: Number.isFinite(maxHours) && maxHours > 0
                 ? maxHours
                 : Infinity,
-            availability: buildAvailabilityMask(member),
-            preference: buildPreferenceMask(member),
+            availability: buildAvailabilityMask(member, grid),
+            preference: buildPreferenceMask(member, grid),
         };
     });
 
@@ -278,14 +295,14 @@ function buildProblem({ courses, faculty, rooms }) {
         index,
         doc: room,
         id: String(room._id),
-        availability: buildAvailabilityMask(room),
+        availability: buildAvailabilityMask(room, grid),
     }));
 
     const groupKeys = new Map();
 
     const courseInfo = courses.map((course, index) => {
 
-        const sessions = Number(getWeeklySessions(course));
+        const sessions = Number(getWeeklySessions(course, grid.weeks));
 
         if (
             !Number.isFinite(sessions) ||
@@ -338,11 +355,12 @@ function buildProblem({ courses, faculty, rooms }) {
     });
 
     return {
+        grid,
         courses: courseInfo,
         faculty: facultyInfo,
         rooms: roomInfo,
         groupCount: groupKeys.size,
-        cellCount: DAYS.length * TIME_SLOTS.length,
+        cellCount: grid.days.length * grid.slots.length,
         warnings,
     };
 }
@@ -369,7 +387,7 @@ function createOccupancy() {
 
 function occupy(occupancy, problem, course, facultyInfo, gene) {
 
-    const cell = gene.dayIdx * TIME_SLOTS.length + gene.slotIdx;
+    const cell = gene.dayIdx * problem.grid.slots.length + gene.slotIdx;
 
     const roomInfo = course.eligibleRooms[gene.roomIdx];
 
@@ -410,6 +428,9 @@ function sampleSession(rng, problem, course, facultyChoice, occupancy) {
 
     const facultyInfo = course.eligibleFaculty[facultyChoice];
 
+    const days = problem.grid.days;
+    const slots = problem.grid.slots;
+
     const free = [];
     const available = [];
 
@@ -417,11 +438,11 @@ function sampleSession(rng, problem, course, facultyChoice, occupancy) {
 
         const roomInfo = course.eligibleRooms[roomIdx];
 
-        for (let d = 0; d < DAYS.length; d++) {
+        for (let d = 0; d < days.length; d++) {
 
-            for (let s = 0; s < TIME_SLOTS.length; s++) {
+            for (let s = 0; s < slots.length; s++) {
 
-                const cell = d * TIME_SLOTS.length + s;
+                const cell = d * slots.length + s;
 
                 if (
                     !facultyInfo.availability[cell] ||
@@ -455,8 +476,8 @@ function sampleSession(rng, problem, course, facultyChoice, occupancy) {
     }
 
     return {
-        dayIdx: rng.int(DAYS.length),
-        slotIdx: rng.int(TIME_SLOTS.length),
+        dayIdx: rng.int(days.length),
+        slotIdx: rng.int(slots.length),
         roomIdx: rng.int(course.eligibleRooms.length),
     };
 }
@@ -524,6 +545,9 @@ function evaluate(chromosome, problem) {
     let hard = 0;
     let soft = 0;
 
+    const days = problem.grid.days;
+    const slots = problem.grid.slots;
+
     const facultySlots = new Set();
     const roomSlots = new Set();
     const groupSlots = new Set();
@@ -540,7 +564,7 @@ function evaluate(chromosome, problem) {
 
         const genes = chromosome.sessionGenes[c];
 
-        const dayCounts = new Array(DAYS.length).fill(0);
+        const dayCounts = new Array(days.length).fill(0);
 
         for (let i = 0; i < genes.length; i++) {
 
@@ -549,7 +573,7 @@ function evaluate(chromosome, problem) {
             const roomInfo = course.eligibleRooms[gene.roomIdx];
 
             const cell =
-                gene.dayIdx * TIME_SLOTS.length + gene.slotIdx;
+                gene.dayIdx * slots.length + gene.slotIdx;
 
             const facultyKey = facultyInfo.index * problem.cellCount + cell;
             const roomKey = roomInfo.index * problem.cellCount + cell;
@@ -751,13 +775,13 @@ function decode(chromosome, problem) {
         for (const gene of chromosome.sessionGenes[c]) {
 
             const roomInfo = course.eligibleRooms[gene.roomIdx];
-            const slot = TIME_SLOTS[gene.slotIdx];
+            const slot = problem.grid.slots[gene.slotIdx];
 
             schedule.push({
                 courseId: course.id,
                 facultyId: facultyInfo.id,
                 roomId: roomInfo.id,
-                day: DAYS[gene.dayIdx],
+                day: problem.grid.days[gene.dayIdx],
                 startTime: slot.start,
                 endTime: slot.end,
             });
@@ -780,6 +804,8 @@ function decode(chromosome, problem) {
  * @param {Array} params.faculty faculty that may be assigned
  * @param {Array} params.rooms rooms that may be used
  * @param {object} [params.options] GA tunables (see DEFAULTS)
+ * @param {object} [params.grid] scheduling grid; defaults to
+ *        DEFAULT_GRID, i.e. today's days and slots
  * @returns {{schedule: Array, stats: object}}
  */
 export function generateGeneticTimetable({
@@ -787,6 +813,7 @@ export function generateGeneticTimetable({
     faculty = [],
     rooms = [],
     options = {},
+    grid = DEFAULT_GRID,
 } = {}) {
 
     if (
@@ -826,7 +853,7 @@ export function generateGeneticTimetable({
 
     const rng = createRng(seed);
 
-    const problem = buildProblem({ courses, faculty, rooms });
+    const problem = buildProblem({ courses, faculty, rooms, grid });
 
     const warnings = problem.warnings.slice();
 
@@ -967,7 +994,8 @@ export function generateGeneticTimetable({
         schedule,
         courses,
         faculty,
-        rooms
+        rooms,
+        grid
     );
 
     const hardErrors = [];

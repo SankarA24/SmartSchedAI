@@ -12,6 +12,7 @@ import { notificationsRouter } from "./routes/notificationsRoute.js";
 import { authRouter } from "./routes/authRoute.js";
 import { usersRouter } from "./routes/usersRoute.js";
 import { studentsRouter } from "./routes/studentsRoute.js";
+import { configRouter } from "./routes/configRoute.js";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use("/api/notifications", notificationsRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/students", studentsRouter);
+app.use("/api/config", configRouter);
 
 const PORT = process.env.PORT || 5000;
 

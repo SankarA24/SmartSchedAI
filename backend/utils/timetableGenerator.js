@@ -7,6 +7,8 @@ import Room from "../models/Room.js";
 import Timetable from "../models/Timetable.js";
 import Notification from "../models/Notification.js";
 import dotenv from "dotenv";
+import { DEFAULT_GRID } from "./schedulingConstants.js";
+import { getWeeklySessions } from "./schedulingHelpers.js";
 
 dotenv.config({ quiet: true });
 
@@ -40,69 +42,17 @@ try {
 // =========================================================
 // CONFIGURATION
 // =========================================================
-
-const WEEKS = 13;
-
-const DAYS = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-];
-
-const TIME_SLOTS = [
-    {
-        start: "09:00",
-        end: "10:00",
-    },
-    {
-        start: "10:00",
-        end: "11:00",
-    },
-    {
-        start: "11:15",
-        end: "12:15",
-    },
-    {
-        start: "14:15",
-        end: "15:15",
-    },
-    {
-        start: "15:15",
-        end: "16:15",
-    },
-    {
-        start: "16:30",
-        end: "17:30",
-    },
-];
-
-const BREAK_SLOT = {
-    start: "12:15",
-    end: "13:15",
-};
+//
+// WEEKS, DAYS, TIME_SLOTS, BREAK_SLOT and getWeeklySessions
+// used to be private copies of the shared scheduling grid.
+// The days, slots, breaks and week count now come from the
+// `grid` argument (DEFAULT_GRID, imported from
+// ./schedulingConstants.js, when a caller passes none), and
+// getWeeklySessions from ./schedulingHelpers.js, so the prompt,
+// this file's validator and the metadata all agree with the
+// genetic scheduler, the local scheduler and the validator.
 
 const MAX_GENERATION_ATTEMPTS = 3;
-
-
-// =========================================================
-// HELPER - WEEKLY SESSIONS
-// =========================================================
-
-function getWeeklySessions(course) {
-
-    if (
-        course.totalHours &&
-        Number(course.totalHours) > 0
-    ) {
-        return Math.ceil(
-            Number(course.totalHours) / WEEKS
-        );
-    }
-
-    return Number(course.hoursPerWeek) || 3;
-}
 
 
 // =========================================================
@@ -446,7 +396,8 @@ export function validateSchedule(
     schedule,
     relevantCourses,
     relevantFaculty,
-    allRooms
+    allRooms,
+    grid = DEFAULT_GRID
 ) {
 
     const errors = [];
@@ -532,7 +483,7 @@ export function validateSchedule(
     ) {
 
         if (
-            !DAYS.includes(
+            !grid.days.includes(
                 entry.day
             )
         ) {
@@ -553,7 +504,7 @@ export function validateSchedule(
     ) {
 
         const validSlot =
-            TIME_SLOTS.some(
+            grid.slots.some(
                 slot =>
                     slot.start ===
                         entry.startTime &&
@@ -786,7 +737,7 @@ export function validateSchedule(
     ) {
 
         const requiredSessions =
-            getWeeklySessions(course);
+            getWeeklySessions(course, grid.weeks);
 
         const actualSessions =
             schedule.filter(
@@ -1090,8 +1041,13 @@ function buildPrompt(
     relevantCourses,
     relevantFaculty,
     allRooms,
-    previousErrors = []
+    previousErrors = [],
+    grid = DEFAULT_GRID
 ) {
+
+    const breakLabel = grid.breaks
+        .map(brk => `${brk.start}-${brk.end}`)
+        .join(", ");
 
     return `
 You are an expert university timetable scheduling system.
@@ -1114,16 +1070,16 @@ Academic Year:
 ${academicYear}
 
 Weeks in Academic Term:
-${WEEKS}
+${grid.weeks}
 
 Available Days:
-${JSON.stringify(DAYS)}
+${JSON.stringify(grid.days)}
 
 Available Time Slots:
-${JSON.stringify(TIME_SLOTS)}
+${JSON.stringify(grid.slots)}
 
 Mandatory Break:
-${BREAK_SLOT.start}-${BREAK_SLOT.end}
+${breakLabel}
 
 DO NOT schedule any class during the break.
 
@@ -1139,7 +1095,7 @@ Course:
 - Type: ${course.type || "lecture"}
 - Credits: ${course.credits}
 - Hours Per Week: ${course.hoursPerWeek || 3}
-- Required Weekly Sessions: ${getWeeklySessions(course)}
+- Required Weekly Sessions: ${getWeeklySessions(course, grid.weeks)}
 - Description: ${course.description || "N/A"}
 - Prerequisites: ${JSON.stringify(course.prerequisites || [])}
 `).join("\n")}
@@ -1224,7 +1180,7 @@ HARD CONSTRAINTS
 
 16. Use ONLY the supplied time slots.
 
-17. Never schedule during ${BREAK_SLOT.start}-${BREAK_SLOT.end}.
+17. Never schedule during any of: ${breakLabel}.
 
 18. Respect faculty avoid-time preferences.
 
@@ -1293,7 +1249,8 @@ Generate the complete timetable now.
 
 export async function generateTimetableWithAI(
     request,
-    context = null
+    context = null,
+    grid = DEFAULT_GRID
 ) {
 
     console.log(
@@ -1456,7 +1413,8 @@ export async function generateTimetableWithAI(
             relevantCourses.filter(
                 course =>
                     !getWeeklySessions(
-                        course
+                        course,
+                        grid.weeks
                     )
             );
 
@@ -1517,7 +1475,8 @@ export async function generateTimetableWithAI(
                     relevantCourses,
                     relevantFaculty,
                     allRooms,
-                    lastErrors
+                    lastErrors,
+                    grid
                 );
 
 
@@ -1614,7 +1573,8 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
                     schedule,
                     relevantCourses,
                     relevantFaculty,
-                    allRooms
+                    allRooms,
+                    grid
                 );
 
 
@@ -1758,8 +1718,8 @@ for (let aiAttempt = 1; aiAttempt <= 3; aiAttempt++) {
             enrichedSchedule.length;
 
         const availableSlots =
-            DAYS.length *
-            TIME_SLOTS.length;
+            grid.days.length *
+            grid.slots.length;
 
         const utilizationRate =
             availableSlots > 0

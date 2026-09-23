@@ -14,17 +14,22 @@ import { WEEKS } from "./schedulingConstants.js";
  * Prefers an explicit total-hours budget, then hoursPerWeek,
  * then a sane default of 3.
  *
+ * The teaching-week count is a parameter so a configured grid
+ * can supply its own; it defaults to WEEKS, which is what every
+ * existing caller relies on.
+ *
  * @param {object} course
+ * @param {number} [weeks] teaching weeks in the semester
  * @returns {number}
  */
-export function getWeeklySessions(course) {
+export function getWeeklySessions(course, weeks = WEEKS) {
 
     if (
         course.totalHours &&
         Number(course.totalHours) > 0
     ) {
         return Math.ceil(
-            Number(course.totalHours) / WEEKS
+            Number(course.totalHours) / weeks
         );
     }
 

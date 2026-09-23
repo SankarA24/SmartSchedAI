@@ -3,6 +3,8 @@
 import Course from "../models/course.js";
 import Faculty from "../models/Faculty.js";
 import Room from "../models/Room.js";
+import SystemConfig from "../models/SystemConfig.js";
+import { DEFAULT_GRID, getScheduleGrid } from "./schedulingConstants.js";
 
 // =========================================================
 // ESCAPE REGEX
@@ -53,6 +55,10 @@ export async function loadSchedulingContext({
 
     const rooms = await Room.find({});
 
+    const config = await SystemConfig.findOne({ key: "active" });
+
+    const grid = config ? getScheduleGrid(config) : DEFAULT_GRID;
+
     return {
         courses,
         faculty,
@@ -62,5 +68,7 @@ export async function loadSchedulingContext({
             faculty: faculty.length,
             rooms: rooms.length,
         },
+        config,
+        grid,
     };
 }

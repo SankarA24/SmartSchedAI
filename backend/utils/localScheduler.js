@@ -41,6 +41,8 @@ import {
     courseGroupKey,
 } from "./schedulingHelpers.js";
 
+import { DEFAULT_GRID } from "./schedulingConstants.js";
+
 
 /**
  * Split a slot ("09:00-10:00" or {start, end}) into start/end times.
@@ -128,11 +130,24 @@ export function generateLocalTimetable({
     courses = [],
     faculty = [],
     rooms = [],
-    days = [],
-    timeSlots = [],
+    days,
+    timeSlots,
+    grid = DEFAULT_GRID,
     getWeeklySessions =
         defaultGetWeeklySessions,
 }) {
+
+    // Callers that already pass days/timeSlots explicitly keep
+    // behaving identically; grid only fills in what they omitted.
+    days =
+        Array.isArray(days) && days.length
+            ? days
+            : grid.days;
+
+    timeSlots =
+        Array.isArray(timeSlots) && timeSlots.length
+            ? timeSlots
+            : grid.slots;
 
     console.log(
         "=========================================="
