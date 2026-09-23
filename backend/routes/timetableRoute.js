@@ -856,7 +856,14 @@ async function runGenerationPipeline({
                         year,
                         academicYear
                     },
-                    context
+                    context,
+                    // The configured grid, so the AI branch honours
+                    // SystemConfig instead of falling back to
+                    // DEFAULT_GRID, and the express app, so the
+                    // notifications it saves are emitted live like
+                    // every other path's.
+                    context.grid,
+                    app
                 );
 
             console.log(

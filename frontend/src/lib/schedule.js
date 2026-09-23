@@ -103,7 +103,14 @@ export function buildGrid(config) {
     index,
   }));
 
-  const rawBreaks = Array.isArray(src.breaks) && src.breaks.length ? src.breaks : DEFAULT_BREAKS;
+  // "absent" and "deliberately empty" are different: an admin who deletes
+  // every break in /infrastructure saves `breaks: []`, and the grid must then
+  // have no break rows. Mirrors `getScheduleGrid`
+  // (backend/utils/schedulingConstants.js), which also only falls back when
+  // `breaks` is not an array. `slots` above keeps its `.length` check on
+  // purpose: the server never returns an empty slot list — `deriveSlots`
+  // always produces periods — so an empty one here means "not supplied yet".
+  const rawBreaks = Array.isArray(src.breaks) ? src.breaks : DEFAULT_BREAKS;
   const breaks = rawBreaks.map((brk) => ({
     name: brk.name || "Break",
     start: brk.start,
