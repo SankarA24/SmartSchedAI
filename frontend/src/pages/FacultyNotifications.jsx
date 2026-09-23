@@ -17,64 +17,80 @@ import {
 
 import { Link, useNavigate } from "react-router-dom";
 
+import useIdentity from "@/hooks/useIdentity";
+
 export default function FacultyNotifications() {
   const navigate = useNavigate();
 
-  const [faculty, setFaculty] = useState(null);
+  // Who is signed in comes from the shared hook (GET /api/auth/me), not from
+  // this page re-reading and re-guessing `localStorage`. `faculty` is the
+  // linked Faculty doc, so the header no longer needs its own /faculty fetch.
+  const {
+    user,
+    faculty,
+    linked,
+    loading: identityLoading,
+  } = useIdentity();
+
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+
+  const signedIn = Boolean(user);
 
   useEffect(() => {
+    // Wait for identity to settle before deciding what to fetch.
+    if (identityLoading) return undefined;
+
+    if (!signedIn) {
+      navigate("/login");
+      return undefined;
+    }
+
+    // An unlinked faculty account has no data to show — the screen below
+    // says so rather than listing anything.
+    if (!linked) {
+      setNotifications([]);
+      setNotificationsLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
     const loadNotifications = async () => {
       try {
-        const storedUser = localStorage.getItem("user");
+        // GET /api/notifications is audience-scoped server-side
+        // (`audienceFilter` in backend/routes/notificationsRoute.js): it
+        // returns the notifications addressed to everyone, the ones
+        // addressed to this caller's role, and the ones addressed to this
+        // user by id. So the client has nothing left to guess about
+        // ownership, and deliberately filters nothing here.
+        const response = await api.get(`/notifications`);
 
-        if (!storedUser) {
-          navigate("/login");
-          return;
-        }
+        if (cancelled) return;
 
-        const user = JSON.parse(storedUser);
-
-        let facultyData = null;
-
-        if (user.facultyId) {
-          const response = await api.get(
-            `/faculty/${user.facultyId}`
-          );
-
-          facultyData = response.data;
-        } else if (user.email) {
-          const response = await api.get(
-            `/faculty`
-          );
-
-          facultyData = response.data.find(
-            (member) =>
-              member.email?.toLowerCase() ===
-              user.email?.toLowerCase()
-          );
-        }
-
-        setFaculty(facultyData);
-
-        const response = await api.get(
-          `/notifications`
+        setNotifications(
+          Array.isArray(response.data) ? response.data : []
         );
-
-        setNotifications(response.data || []);
       } catch (error) {
         console.error(
           "Failed to load notifications:",
           error
         );
+
+        if (!cancelled) setNotifications([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setNotificationsLoading(false);
       }
     };
 
     loadNotifications();
-  }, [navigate]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [identityLoading, signedIn, linked, navigate]);
+
+  const loading = identityLoading || notificationsLoading;
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -179,6 +195,43 @@ export default function FacultyNotifications() {
             <div className="bg-slate-800/30 rounded-2xl h-96 animate-pulse" />
 
           </div>
+        </div>
+
+      </div>
+    );
+  }
+
+  // ---------------------------------------------
+  // Unlinked account
+  //
+  // `User.facultyId` is null, so there is no Faculty record behind this
+  // login. Nothing is invented in its place.
+  // ---------------------------------------------
+
+  if (!linked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+
+        <div className="text-center max-w-md">
+
+          <User className="w-16 h-16 text-amber-400 mx-auto mb-5" />
+
+          <h1 className="text-2xl font-bold text-white mb-3">
+            Profile not linked — contact your administrator
+          </h1>
+
+          <p className="text-slate-400 mb-6">
+            This account is not linked to a faculty record, so there are no
+            notifications to show for it.
+          </p>
+
+          <button
+            onClick={handleLogout}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white"
+          >
+            Return to Login
+          </button>
+
         </div>
 
       </div>
@@ -311,7 +364,7 @@ export default function FacultyNotifications() {
               </p>
 
               <p className="text-sm font-semibold text-white">
-                {faculty?.name || "Faculty"}
+                {faculty?.name || user?.name || "Faculty"}
               </p>
 
             </div>

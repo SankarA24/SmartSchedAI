@@ -15,455 +15,299 @@ import {
   DoorOpen,
 } from "lucide-react";
 import api from "@/lib/api";
+import useIdentity from "@/hooks/useIdentity";
+import { useTimetableData } from "@/hooks/useTimetableData";
+import { StatCard as AnalyticsStat } from "@/components/common/StatCard";
+
+/* ============================================================
+   COHORT SCOPING
+   ------------------------------------------------------------
+   This block is deliberately IDENTICAL in pages/StudentPortal.jsx
+   and pages/MyTimetable.jsx. The dashboard and the timetable page
+   used to match timetables with two different sets of rules, so
+   they could show the same student two different timetables with
+   nothing on screen saying they disagreed. Both now read the
+   same identity (useIdentity → GET /api/auth/me) and run the
+   same selection over the same server-scoped GET /api/timetables.
+   Change one copy, change the other.
+
+   There are NO cohort defaults here on purpose: no default
+   department, no default semester, no default academic year
+   taken from the system clock. An unknown field means
+   "unknown", and a student whose cohort cannot be resolved
+   gets an empty state — never somebody else's timetable.
+============================================================ */
+
+const isBlank = (value) =>
+  value === undefined || value === null || value === "";
+
+const normalizeText = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const normalizeSemester = (value) => {
+  const match = String(value ?? "").match(/\d+/);
+  return match ? match[0] : "";
+};
+
+const getId = (value) => {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+
+  if (value.$oid) return String(value.$oid);
+  if (value._id) return getId(value._id);
+  if (value.id) return getId(value.id);
+
+  if (typeof value.toString === "function") {
+    const result = value.toString();
+    if (result && result !== "[object Object]") {
+      return String(result);
+    }
+  }
+
+  return null;
+};
+
+const normalizeDay = (day) => {
+  if (!day) return "";
+
+  const value = String(day).trim().toLowerCase();
+
+  const days = {
+    monday: "Monday",
+    tuesday: "Tuesday",
+    wednesday: "Wednesday",
+    thursday: "Thursday",
+    friday: "Friday",
+    saturday: "Saturday",
+    sunday: "Sunday",
+  };
+
+  return days[value] || String(day);
+};
+
+const formatTime = (time) => {
+  if (!time) return "";
+
+  if (typeof time !== "string") {
+    return String(time);
+  }
+
+  return time.length >= 5 ? time.substring(0, 5) : time;
+};
+
+/**
+ * Does this user have enough profile to name a cohort at all?
+ * `department` is the minimum; without it there is nothing to scope to.
+ */
+function hasCohort(identity) {
+  return Boolean(identity && !isBlank(identity.department));
+}
+
+/**
+ * Query params for GET /api/timetables, built only from what the profile
+ * actually says. The server rebuilds the filter from the JWT for a student
+ * and ignores these (see backend/routes/timetableRoute.js#buildStudentFilter),
+ * so they are a statement of intent, never the thing that keeps other
+ * cohorts out.
+ */
+function cohortFilters(identity) {
+  if (!hasCohort(identity)) return undefined;
+
+  const filters = { department: identity.department, status: "published" };
+
+  if (!isBlank(identity.semester)) filters.semester = String(identity.semester);
+  if (!isBlank(identity.year)) filters.year = identity.year;
+  if (!isBlank(identity.academicYear)) filters.academicYear = identity.academicYear;
+
+  return filters;
+}
+
+/**
+ * Client-side second layer, mirroring the server's `matchesStudentGroup`.
+ * Defence in depth: the server already returns only this student's cohort,
+ * published; this re-checks every row before it is rendered.
+ */
+function matchesCohort(timetable, identity) {
+  if (!timetable || !hasCohort(identity)) return false;
+
+  if (normalizeText(timetable.department) !== normalizeText(identity.department)) {
+    return false;
+  }
+
+  if (
+    !isBlank(identity.semester) &&
+    normalizeSemester(timetable.semester) !== normalizeSemester(identity.semester)
+  ) {
+    return false;
+  }
+
+  // Legacy docs (pre `academicYear`) keep the calendar year in `year`.
+  const legacy = isBlank(timetable.academicYear);
+
+  if (
+    !legacy &&
+    !isBlank(identity.year) &&
+    Number(timetable.year) !== Number(identity.year)
+  ) {
+    return false;
+  }
+
+  if (
+    !isBlank(identity.academicYear) &&
+    Number(legacy ? timetable.year : timetable.academicYear) !==
+      Number(identity.academicYear)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * The one timetable this student is shown, or null.
+ *
+ * Published first, then most recently updated. There is deliberately no
+ * "any non-empty timetable" fallback: if nothing matches the student's own
+ * cohort the answer is null and the page says so.
+ */
+function selectCohortTimetable(timetables, identity) {
+  const candidates = (Array.isArray(timetables) ? timetables : []).filter(
+    (timetable) =>
+      Array.isArray(timetable?.schedule) && matchesCohort(timetable, identity)
+  );
+
+  if (candidates.length === 0) return null;
+
+  const statusRank = (timetable) =>
+    normalizeText(timetable?.status) === "published" ? 0 : 1;
+
+  const ranked = [...candidates].sort((a, b) => {
+    const byStatus = statusRank(a) - statusRank(b);
+    if (byStatus !== 0) return byStatus;
+
+    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+
+    return dateB - dateA;
+  });
+
+  return ranked[0] || null;
+}
+
+/** Schedule entries of the chosen timetable, exact duplicates removed. */
+function uniqueEntries(schedule) {
+  const entries = Array.isArray(schedule) ? schedule : [];
+
+  const result = [];
+  const seen = new Set();
+
+  entries.forEach((entry) => {
+    const courseId = getId(
+      entry.courseId || entry.courseID || entry.course_id || entry.course
+    );
+
+    const roomId = getId(
+      entry.roomId || entry.roomID || entry.room_id || entry.room
+    );
+
+    const key = [
+      courseId || entry.courseName || "course",
+      roomId || entry.roomName || "room",
+      normalizeDay(entry.day || entry.weekday),
+      formatTime(entry.startTime || entry.start),
+      formatTime(entry.endTime || entry.end),
+    ].join("|");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(entry);
+    }
+  });
+
+  return result;
+}
+
+/* ============================================================
+   STUDENT PORTAL
+============================================================ */
 
 function StudentPortal() {
   const navigate = useNavigate();
 
-  const [user, setUser] = useState(null);
-  const [courses, setCourses] = useState([]);
-  const [rooms, setRooms] = useState([]);
-  const [schedule, setSchedule] = useState([]);
+  // Identity comes from the shared hook only — never from an inline
+  // localStorage read, and never with a guessed department/semester/year.
+  const {
+    user,
+    linked,
+    loading: identityLoading,
+    error: identityError,
+  } = useIdentity();
+
+  const filters = useMemo(() => cohortFilters(user), [user]);
+
+  const {
+    timetables,
+    courses,
+    rooms,
+    loading: dataLoading,
+    error: dataError,
+  } = useTimetableData(filters);
+
   const [notifications, setNotifications] = useState([]);
-  const [selectedTimetable, setSelectedTimetable] = useState(null);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   // ------------------------------------------------------------
-  // ID / VALUE HELPERS
-  // ------------------------------------------------------------
-
-  const getId = (value) => {
-    if (value === null || value === undefined) return null;
-
-    if (typeof value === "string" || typeof value === "number") {
-      return String(value);
-    }
-
-    if (value.$oid) return String(value.$oid);
-    if (value._id) return getId(value._id);
-    if (value.id) return getId(value.id);
-
-    if (typeof value.toString === "function") {
-      const result = value.toString();
-      if (result && result !== "[object Object]") {
-        return String(result);
-      }
-    }
-
-    return null;
-  };
-
-  const normalizeText = (value) =>
-    String(value ?? "")
-      .trim()
-      .toLowerCase();
-
-  const normalizeSemester = (value) => {
-    const match = String(value ?? "").match(/\d+/);
-    return match ? match[0] : "";
-  };
-
-  const normalizeDay = (day) => {
-    if (!day) return "Monday";
-
-    const value = String(day).trim().toLowerCase();
-
-    const days = {
-      monday: "Monday",
-      tuesday: "Tuesday",
-      wednesday: "Wednesday",
-      thursday: "Thursday",
-      friday: "Friday",
-      saturday: "Saturday",
-      sunday: "Sunday",
-    };
-
-    return days[value] || String(day);
-  };
-
-  const formatTime = (time) => {
-    if (!time) return "";
-
-    if (typeof time !== "string") {
-      return String(time);
-    }
-
-    return time.length >= 5 ? time.substring(0, 5) : time;
-  };
-
-  // ------------------------------------------------------------
-  // GET LOGGED-IN USER
+  // NO SESSION → LOGIN
   // ------------------------------------------------------------
 
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem("user");
-
-      if (!storedUser) {
-        navigate("/login");
-        return;
-      }
-
-      const parsedUser = JSON.parse(storedUser);
-      setUser(parsedUser);
-    } catch (err) {
-      console.error("Unable to read logged-in user:", err);
-      localStorage.removeItem("user");
-      localStorage.removeItem("token");
+    if (!identityLoading && !user) {
       navigate("/login");
     }
-  }, [navigate]);
+  }, [identityLoading, user, navigate]);
 
   // ------------------------------------------------------------
-  // FETCH
-  // ------------------------------------------------------------
-
-  const fetchData = async (url) => {
-    const response = await api.get(url.replace(/^\/api/, ""));
-    return response.data;
-  };
-
-  // ------------------------------------------------------------
-  // NORMALIZE API ARRAYS
-  // ------------------------------------------------------------
-
-  const toArray = (data, keys = []) => {
-    if (Array.isArray(data)) return data;
-
-    for (const key of keys) {
-      if (Array.isArray(data?.[key])) return data[key];
-    }
-
-    return [];
-  };
-
-  // ------------------------------------------------------------
-  // LOAD STUDENT DATA
+  // NOTIFICATIONS (scoped server-side by audience/role)
   // ------------------------------------------------------------
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
 
     let cancelled = false;
 
-    const loadStudentData = async () => {
-      setLoading(true);
-      setError("");
-
-      try {
-        const results = await Promise.allSettled([
-          fetchData("/api/courses"),
-          fetchData("/api/rooms"),
-          fetchData("/api/timetables"),
-          fetchData("/api/notifications"),
-        ]);
-
+    api
+      .get("/notifications")
+      .then(({ data }) => {
         if (cancelled) return;
-
-        // ---------------- COURSES ----------------
-
-        if (results[0].status === "fulfilled") {
-          setCourses(
-            toArray(results[0].value, [
-              "courses",
-              "data",
-              "results",
-            ])
-          );
-        } else {
-          console.error("Courses API error:", results[0].reason);
-          setCourses([]);
-        }
-
-        // ---------------- ROOMS ----------------
-
-        if (results[1].status === "fulfilled") {
-          setRooms(
-            toArray(results[1].value, [
-              "rooms",
-              "data",
-              "results",
-            ])
-          );
-        } else {
-          console.error("Rooms API error:", results[1].reason);
-          setRooms([]);
-        }
-
-        // ---------------- TIMETABLE ----------------
-        //
-        // IMPORTANT:
-        // /api/timetables returns TIMETABLE DOCUMENTS.
-        //
-        // Each document has:
-        // {
-        //   name,
-        //   semester,
-        //   year,
-        //   department,
-        //   status,
-        //   schedule: [...]
-        // }
-        //
-        // The actual class entries are inside timetable.schedule.
-        // The old code was displaying the timetable documents
-        // themselves, which caused "Unknown Course", Monday
-        // 09:00 - 10:00, and missing rooms.
-
-        if (results[2].status === "fulfilled") {
-          const timetableData = results[2].value;
-
-          let timetables = toArray(timetableData, [
-            "timetables",
-            "data",
-            "results",
-          ]);
-
-          // If the API itself returned one timetable object.
-          if (
-            timetables.length === 0 &&
-            timetableData &&
-            Array.isArray(timetableData.schedule)
-          ) {
-            timetables = [timetableData];
-          }
-
-          // If backend returns an array directly, toArray already handles it.
-          // If it returns grouped day data, convert it into one timetable.
-          if (
-            timetables.length === 0 &&
-            timetableData &&
-            typeof timetableData === "object"
-          ) {
-            const days = [
-              "monday",
-              "tuesday",
-              "wednesday",
-              "thursday",
-              "friday",
-              "saturday",
-              "sunday",
-            ];
-
-            const groupedSchedule = [];
-
-            days.forEach((day) => {
-              if (Array.isArray(timetableData[day])) {
-                timetableData[day].forEach((entry) => {
-                  groupedSchedule.push({
-                    ...entry,
-                    day: entry.day || normalizeDay(day),
-                  });
-                });
-              }
-            });
-
-            if (groupedSchedule.length > 0) {
-              timetables = [
-                {
-                  schedule: groupedSchedule,
-                  department: user.department,
-                  semester: user.semester,
-                  year: user.year || new Date().getFullYear(),
-                },
-              ];
-            }
-          }
-
-          // ---------------- SELECT CORRECT TIMETABLE ----------------
-
-          const userDepartment =
-            user.department ||
-            user.departmentName ||
-            "Computer Science";
-
-          const userSemester =
-            user.semester ||
-            user.semesterNumber ||
-            user.currentSemester ||
-            "1";
-
-          const userYear =
-            Number(
-              user.year ||
-                user.academicYear ||
-                user.currentYear ||
-                new Date().getFullYear()
-            ) || new Date().getFullYear();
-
-          const matchingTimetables = timetables.filter((timetable) => {
-            const departmentMatches =
-              !timetable.department ||
-              normalizeText(timetable.department) ===
-                normalizeText(userDepartment);
-
-            const semesterMatches =
-              !timetable.semester ||
-              normalizeSemester(timetable.semester) ===
-                normalizeSemester(userSemester);
-
-            const yearMatches =
-              !timetable.year ||
-              Number(timetable.year) === userYear;
-
-            return (
-              departmentMatches &&
-              semesterMatches &&
-              yearMatches &&
-              Array.isArray(timetable.schedule)
-            );
-          });
-
-          const candidates =
-            matchingTimetables.length > 0
-              ? matchingTimetables
-              : timetables.filter(
-                  (timetable) =>
-                    Array.isArray(timetable.schedule) &&
-                    timetable.schedule.length > 0
-                );
-
-          // Prefer published/active/finalized timetables over drafts.
-          // If all are drafts, use the latest one.
-          const statusRank = (status) => {
-            const value = normalizeText(status);
-
-            if (
-              ["published", "active", "approved", "final", "finalized"].includes(
-                value
-              )
-            ) {
-              return 0;
-            }
-
-            if (value === "draft") return 2;
-
-            return 1;
-          };
-
-          const sortedTimetables = [...candidates].sort((a, b) => {
-            const statusDifference =
-              statusRank(a.status) - statusRank(b.status);
-
-            if (statusDifference !== 0) {
-              return statusDifference;
-            }
-
-            const dateA = new Date(
-              a.updatedAt || a.createdAt || 0
-            ).getTime();
-
-            const dateB = new Date(
-              b.updatedAt || b.createdAt || 0
-            ).getTime();
-
-            return dateB - dateA;
-          });
-
-          const chosenTimetable = sortedTimetables[0] || null;
-
-          setSelectedTimetable(chosenTimetable);
-
-          if (chosenTimetable) {
-            // THIS is the critical fix:
-            // use timetable.schedule, not the timetable document itself.
-            const entries = Array.isArray(chosenTimetable.schedule)
-              ? chosenTimetable.schedule
-              : [];
-
-            // Remove exact duplicate schedule entries.
-            const uniqueEntries = [];
-            const seen = new Set();
-
-            entries.forEach((entry) => {
-              const courseId = getId(
-                entry.courseId ||
-                  entry.courseID ||
-                  entry.course_id ||
-                  entry.course
-              );
-
-              const roomId = getId(
-                entry.roomId ||
-                  entry.roomID ||
-                  entry.room_id ||
-                  entry.room
-              );
-
-              const key = [
-                courseId || entry.courseName || "course",
-                roomId || entry.roomName || "room",
-                normalizeDay(entry.day || entry.weekday),
-                formatTime(entry.startTime || entry.start),
-                formatTime(entry.endTime || entry.end),
-              ].join("|");
-
-              if (!seen.has(key)) {
-                seen.add(key);
-                uniqueEntries.push(entry);
-              }
-            });
-
-            setSchedule(uniqueEntries);
-          } else {
-            setSchedule([]);
-          }
-        } else {
-          console.error("Timetable API error:", results[2].reason);
-          setSchedule([]);
-          setSelectedTimetable(null);
-        }
-
-        // ---------------- NOTIFICATIONS ----------------
-
-        if (results[3].status === "fulfilled") {
-          setNotifications(
-            toArray(results[3].value, [
-              "notifications",
-              "data",
-              "results",
-            ])
-          );
-        } else {
-          console.error(
-            "Notifications API error:",
-            results[3].reason
-          );
-          setNotifications([]);
-        }
-
-        // Only show a general error if the main timetable API failed.
-        if (
-          results[2].status === "rejected" &&
-          results[0].status === "rejected" &&
-          results[1].status === "rejected"
-        ) {
-          setError(
-            "Unable to connect to the backend. Make sure the backend is running on port 5000."
-          );
-        }
-      } catch (err) {
-        console.error("Student portal loading error:", err);
-
-        if (!cancelled) {
-          setError(
-            "Unable to load student portal data. Check that the backend is running."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadStudentData();
+        setNotifications(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        console.warn("StudentPortal: failed to load notifications", err);
+        if (!cancelled) setNotifications([]);
+      });
 
     return () => {
       cancelled = true;
     };
   }, [user]);
+
+  // ------------------------------------------------------------
+  // THE STUDENT'S OWN TIMETABLE
+  // ------------------------------------------------------------
+
+  const selectedTimetable = useMemo(
+    () => selectCohortTimetable(timetables, user),
+    [timetables, user]
+  );
+
+  const schedule = useMemo(
+    () => uniqueEntries(selectedTimetable?.schedule),
+    [selectedTimetable]
+  );
 
   // ------------------------------------------------------------
   // COURSE LOOKUP
@@ -661,6 +505,7 @@ function StudentPortal() {
       _courseName: getCourseName(entry),
       _roomName: getRoomName(entry),
     }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule, courses, rooms]);
 
   const sortedSchedule = useMemo(() => {
@@ -674,15 +519,17 @@ function StudentPortal() {
 
       return a._startTime.localeCompare(b._startTime);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedSchedule]);
 
   // ------------------------------------------------------------
   // MY COURSES
   // ------------------------------------------------------------
   //
-  // Use courses referenced by the selected timetable.
-  // This prevents unrelated courses from other semesters
-  // appearing in the Student Portal.
+  // Strictly the courses referenced by the student's own timetable.
+  // There is NO fallback to the full course catalogue: an unresolved
+  // reference means one fewer course on screen, not the whole database
+  // presented as this student's enrolment.
 
   const myCourses = useMemo(() => {
     const result = [];
@@ -703,12 +550,8 @@ function StudentPortal() {
       result.push(course);
     });
 
-    // If schedule/course IDs cannot be resolved, fall back to API courses.
-    if (result.length === 0) {
-      return courses;
-    }
-
     return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule, courses]);
 
   // ------------------------------------------------------------
@@ -761,40 +604,43 @@ function StudentPortal() {
   // ------------------------------------------------------------
   // NOTIFICATIONS
   // ------------------------------------------------------------
+  //
+  // Unread only. The old badge fell back to the total count whenever the
+  // unread count was zero, so it could never reach zero.
 
-  const unreadNotifications = notifications.filter(
-    (notification) =>
-      notification.read === false ||
-      notification.isRead === false ||
-      notification.status === "unread"
-  ).length;
+  const unreadNotifications = notifications.filter((notification) => {
+    if (notification?.isRead === true || notification?.read === true) {
+      return false;
+    }
 
-  const notificationCount =
-    unreadNotifications > 0
-      ? unreadNotifications
-      : notifications.length;
+    return normalizeText(notification?.status) !== "read";
+  }).length;
 
   // ------------------------------------------------------------
-  // USER DETAILS
+  // USER DETAILS — profile values only, no invented defaults
   // ------------------------------------------------------------
 
   const studentName = user?.name || "Student";
+  const studentEmail = user?.email || "—";
+  const studentDepartment = user?.department || "—";
+  const studentSemester = isBlank(user?.semester) ? "—" : String(user.semester);
 
-  const studentEmail =
-    user?.email || "student@smartscheduler.com";
+  const loading = identityLoading || dataLoading;
 
-  const studentDepartment =
-    user?.department ||
-    user?.departmentName ||
-    selectedTimetable?.department ||
-    "Computer Science";
+  const timetablesError = dataError?.timetables || null;
 
-  const studentSemester =
-    user?.semester ||
-    user?.semesterNumber ||
-    user?.currentSemester ||
-    selectedTimetable?.semester ||
-    "1";
+  const errorMessage = timetablesError
+    ? `Unable to load your timetable: ${timetablesError}`
+    : identityError || "";
+
+  // Why there is nothing to show, when there is nothing to show.
+  const emptyReason = !linked
+    ? "Profile not linked — contact your administrator"
+    : !hasCohort(user)
+      ? "Your student profile has no department set — contact your administrator"
+      : !selectedTimetable
+        ? "No published timetable for your department and semester yet."
+        : "";
 
   // ------------------------------------------------------------
   // NAVIGATION / LOGOUT
@@ -812,7 +658,7 @@ function StudentPortal() {
   // LOADING
   // ------------------------------------------------------------
 
-  if (!user || loading) {
+  if (loading) {
     return (
       <div style={styles.loadingPage}>
         <div style={styles.loadingBox}>
@@ -880,9 +726,9 @@ function StudentPortal() {
       <span style={styles.navIcon}>♧</span>
       <span>Notifications</span>
 
-      {notificationCount > 0 && (
+      {unreadNotifications > 0 && (
         <span style={styles.notificationBadge}>
-          {notificationCount}
+          {unreadNotifications}
         </span>
       )}
     </button>
@@ -929,242 +775,311 @@ function StudentPortal() {
           </div>
         </div>
 
-        {error && (
-          <div style={styles.errorBox}>{error}</div>
+        {errorMessage && (
+          <div style={styles.errorBox}>{errorMessage}</div>
         )}
 
-        {/* TIMETABLE STATUS */}
-        {selectedTimetable && (
-          <div style={styles.timetableInfo}>
-            <div>
-              <span style={styles.timetableInfoLabel}>
-                CURRENT TIMETABLE
-              </span>
-              <strong style={styles.timetableInfoName}>
-                {selectedTimetable.name ||
-                  `${studentDepartment} - Semester ${studentSemester}`}
-              </strong>
-            </div>
-
-            <span style={styles.statusBadge}>
-              {selectedTimetable.status || "active"}
-            </span>
-          </div>
-        )}
-
-        {/* STATISTICS */}
-        <section style={styles.statsGrid}>
-          <StatCard
-            icon={<BookOpen size={24} />}
-            title="My Courses"
-            value={myCourses.length}
-            iconStyle="blue"
-          />
-
-          <StatCard
-            icon={<CalendarDays size={24} />}
-            title="Weekly Classes"
-            value={weeklyClasses}
-            iconStyle="green"
-          />
-
-          <StatCard
-            icon={<Clock3 size={24} />}
-            title="Weekly Hours"
-            value={weeklyHours}
-            iconStyle="purple"
-          />
-
-          <StatCard
-            icon={<Bell size={24} />}
-            title="Notifications"
-            value={notificationCount}
-            iconStyle="yellow"
-          />
-        </section>
-
-        {/* CONTENT GRID */}
-        <section style={styles.contentGrid}>
-          {/* STUDENT INFORMATION */}
-          <div style={styles.card}>
+        {!linked ? (
+          /* UNLINKED PROFILE — no data is shown at all */
+          <section style={styles.card}>
             <div style={styles.cardHeader}>
               <div>
                 <h2 style={styles.cardTitle}>
-                  Student Information
+                  Profile not linked
                 </h2>
 
                 <p style={styles.cardSubtitle}>
-                  Your academic details
+                  Your account is not connected to a student record
                 </p>
               </div>
             </div>
 
-            <div style={styles.infoGrid}>
-              <InfoItem
-                icon={<User size={20} />}
-                label="Name"
-                value={studentName}
-              />
-
-              <InfoItem
-                icon={<Mail size={20} />}
-                label="Email"
-                value={studentEmail}
-              />
-
-              <InfoItem
-                icon={<Building2 size={20} />}
-                label="Department"
-                value={studentDepartment}
-              />
-
-              <InfoItem
-                icon={<GraduationCap size={20} />}
-                label="Semester"
-                value={studentSemester}
-              />
+            <div style={styles.emptyState}>
+              Profile not linked — contact your administrator
             </div>
-          </div>
+          </section>
+        ) : (
+          <>
+            {/* TIMETABLE STATUS */}
+            {selectedTimetable && (
+              <div style={styles.timetableInfo}>
+                <div>
+                  <span style={styles.timetableInfoLabel}>
+                    CURRENT TIMETABLE
+                  </span>
+                  <strong style={styles.timetableInfoName}>
+                    {selectedTimetable.name ||
+                      `${studentDepartment} - Semester ${studentSemester}`}
+                  </strong>
+                </div>
 
-          {/* MY COURSES */}
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <div>
-                <h2 style={styles.cardTitle}>
-                  My Courses
-                </h2>
+                <span style={styles.statusBadge}>
+                  {selectedTimetable.status}
+                </span>
+              </div>
+            )}
 
-                <p style={styles.cardSubtitle}>
-                  Courses for the current semester
-                </p>
+            {/* STATISTICS */}
+            <section style={styles.statsGrid}>
+              <StatCard
+                icon={<BookOpen size={24} />}
+                title="My Courses"
+                value={myCourses.length}
+                iconStyle="blue"
+              />
+
+              <StatCard
+                icon={<CalendarDays size={24} />}
+                title="Weekly Classes"
+                value={weeklyClasses}
+                iconStyle="green"
+              />
+
+              <StatCard
+                icon={<Clock3 size={24} />}
+                title="Weekly Hours"
+                value={weeklyHours}
+                iconStyle="purple"
+              />
+
+              <StatCard
+                icon={<Bell size={24} />}
+                title="Unread Notifications"
+                value={unreadNotifications}
+                iconStyle="yellow"
+              />
+            </section>
+
+            {/* WEEKLY ANALYTICS — shared StatCard, real data only */}
+            <section style={{ ...styles.card, marginBottom: "28px" }}>
+              <div style={styles.cardHeader}>
+                <div>
+                  <h2 style={styles.cardTitle}>Weekly Analytics</h2>
+
+                  <p style={styles.cardSubtitle}>
+                    Derived from your own published timetable
+                  </p>
+                </div>
               </div>
 
-              <button
-                style={styles.viewButton}
-                onClick={() =>
-                  goTo("/student-portal/courses")
-                }
+              <div
+                style={{
+                  padding: "24px",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: "20px",
+                }}
               >
-                View All
-                <ChevronRight size={18} />
-              </button>
-            </div>
+                <AnalyticsStat
+                  label="Classes per week"
+                  value={weeklyClasses}
+                  icon={CalendarDays}
+                />
 
-            <div style={styles.courseList}>
-              {myCourses.length === 0 ? (
-                <EmptyState text="No courses assigned." />
-              ) : (
-                myCourses.slice(0, 5).map((course, index) => (
-                  <div
-                    key={
-                      getId(course._id || course.id) ||
-                      index
-                    }
-                    style={styles.courseItem}
-                  >
-                    <div style={styles.courseIcon}>
-                      <BookOpen size={20} />
-                    </div>
+                <AnalyticsStat
+                  label="Hours per week"
+                  value={weeklyHours}
+                  icon={Clock3}
+                />
 
-                    <div style={styles.courseText}>
-                      <strong style={styles.courseName}>
-                        {course.name ||
-                          course.title ||
-                          course.courseName ||
-                          "Course"}
-                      </strong>
+                <AnalyticsStat
+                  label="Courses"
+                  value={myCourses.length}
+                  icon={BookOpen}
+                />
+              </div>
+            </section>
 
-                      <span style={styles.courseCode}>
-                        {course.code ||
-                          course.courseCode ||
-                          "—"}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </section>
+            {/* CONTENT GRID */}
+            <section style={styles.contentGrid}>
+              {/* STUDENT INFORMATION */}
+              <div style={styles.card}>
+                <div style={styles.cardHeader}>
+                  <div>
+                    <h2 style={styles.cardTitle}>
+                      Student Information
+                    </h2>
 
-        {/* MY SCHEDULE */}
-        <section style={styles.scheduleCard}>
-          <div style={styles.cardHeader}>
-            <div>
-              <h2 style={styles.cardTitle}>
-                My Schedule
-              </h2>
-
-              <p style={styles.cardSubtitle}>
-                Your assigned classes
-              </p>
-            </div>
-
-            <button
-              style={styles.viewButton}
-              onClick={() =>
-                goTo("/student-portal/timetable")
-              }
-            >
-              View Timetable
-              <ChevronRight size={18} />
-            </button>
-          </div>
-
-          <div style={styles.scheduleList}>
-            {sortedSchedule.length === 0 ? (
-              <EmptyState text="No timetable entries found." />
-            ) : (
-              sortedSchedule.map((entry, index) => (
-                <div
-                  key={entry._displayId || index}
-                  style={styles.scheduleRow}
-                >
-                  {/* DAY */}
-                  <div style={styles.scheduleDay}>
-                    <strong>{entry._day}</strong>
-                  </div>
-
-                  {/* TIME */}
-                  <div style={styles.scheduleTime}>
-                    <Clock3
-                      size={19}
-                      style={styles.timeIcon}
-                    />
-
-                    <strong>
-                      {entry._startTime || "—"} -{" "}
-                      {entry._endTime || "—"}
-                    </strong>
-                  </div>
-
-                  {/* COURSE */}
-                  <div style={styles.scheduleCourse}>
-                    <span style={styles.smallLabel}>
-                      COURSE
-                    </span>
-
-                    <strong>{entry._courseName}</strong>
-                  </div>
-
-                  {/* ROOM */}
-                  <div style={styles.scheduleRoom}>
-                    <span style={styles.smallLabel}>
-                      ROOM
-                    </span>
-
-                    <div style={styles.roomValue}>
-                      <DoorOpen size={18} />
-                      <strong>
-                        {entry._roomName}
-                      </strong>
-                    </div>
+                    <p style={styles.cardSubtitle}>
+                      Your academic details
+                    </p>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </section>
+
+                <div style={styles.infoGrid}>
+                  <InfoItem
+                    icon={<User size={20} />}
+                    label="Name"
+                    value={studentName}
+                  />
+
+                  <InfoItem
+                    icon={<Mail size={20} />}
+                    label="Email"
+                    value={studentEmail}
+                  />
+
+                  <InfoItem
+                    icon={<Building2 size={20} />}
+                    label="Department"
+                    value={studentDepartment}
+                  />
+
+                  <InfoItem
+                    icon={<GraduationCap size={20} />}
+                    label="Semester"
+                    value={studentSemester}
+                  />
+                </div>
+              </div>
+
+              {/* MY COURSES */}
+              <div style={styles.card}>
+                <div style={styles.cardHeader}>
+                  <div>
+                    <h2 style={styles.cardTitle}>
+                      My Courses
+                    </h2>
+
+                    <p style={styles.cardSubtitle}>
+                      Courses for the current semester
+                    </p>
+                  </div>
+
+                  <button
+                    style={styles.viewButton}
+                    onClick={() =>
+                      goTo("/student-portal/courses")
+                    }
+                  >
+                    View All
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+
+                <div style={styles.courseList}>
+                  {myCourses.length === 0 ? (
+                    <EmptyState
+                      text={emptyReason || "No courses assigned."}
+                    />
+                  ) : (
+                    myCourses.slice(0, 5).map((course, index) => (
+                      <div
+                        key={
+                          getId(course._id || course.id) ||
+                          index
+                        }
+                        style={styles.courseItem}
+                      >
+                        <div style={styles.courseIcon}>
+                          <BookOpen size={20} />
+                        </div>
+
+                        <div style={styles.courseText}>
+                          <strong style={styles.courseName}>
+                            {course.name ||
+                              course.title ||
+                              course.courseName ||
+                              "Course"}
+                          </strong>
+
+                          <span style={styles.courseCode}>
+                            {course.code ||
+                              course.courseCode ||
+                              "—"}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* MY SCHEDULE */}
+            <section style={styles.scheduleCard}>
+              <div style={styles.cardHeader}>
+                <div>
+                  <h2 style={styles.cardTitle}>
+                    My Schedule
+                  </h2>
+
+                  <p style={styles.cardSubtitle}>
+                    Your assigned classes
+                  </p>
+                </div>
+
+                <button
+                  style={styles.viewButton}
+                  onClick={() =>
+                    goTo("/student-portal/timetable")
+                  }
+                >
+                  View Timetable
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+
+              <div style={styles.scheduleList}>
+                {sortedSchedule.length === 0 ? (
+                  <EmptyState
+                    text={
+                      emptyReason || "No timetable entries found."
+                    }
+                  />
+                ) : (
+                  sortedSchedule.map((entry, index) => (
+                    <div
+                      key={entry._displayId || index}
+                      style={styles.scheduleRow}
+                    >
+                      {/* DAY */}
+                      <div style={styles.scheduleDay}>
+                        <strong>{entry._day || "—"}</strong>
+                      </div>
+
+                      {/* TIME */}
+                      <div style={styles.scheduleTime}>
+                        <Clock3
+                          size={19}
+                          style={styles.timeIcon}
+                        />
+
+                        <strong>
+                          {entry._startTime || "—"} -{" "}
+                          {entry._endTime || "—"}
+                        </strong>
+                      </div>
+
+                      {/* COURSE */}
+                      <div style={styles.scheduleCourse}>
+                        <span style={styles.smallLabel}>
+                          COURSE
+                        </span>
+
+                        <strong>{entry._courseName}</strong>
+                      </div>
+
+                      {/* ROOM */}
+                      <div style={styles.scheduleRoom}>
+                        <span style={styles.smallLabel}>
+                          ROOM
+                        </span>
+
+                        <div style={styles.roomValue}>
+                          <DoorOpen size={18} />
+                          <strong>
+                            {entry._roomName}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

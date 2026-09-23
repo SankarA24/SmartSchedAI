@@ -84,27 +84,66 @@ const Nav = ({active, navigate, count}) => (
 
 const Page = ({active, navigate, children, count=0}) => <div style={styles.app}><Nav active={active} navigate={navigate} count={count}/><main style={styles.main}>{children}</main></div>;
 
-const userFromStorage = () => {
-  try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; }
-};
-
 import React,{useEffect,useState} from "react";
 import {useNavigate} from "react-router-dom";
 
+import useIdentity from "@/hooks/useIdentity";
+
+const NOT_LINKED = "Profile not linked — contact your administrator";
+
 function Notifications(){
- const navigate=useNavigate(),[user]=useState(userFromStorage),[items,setItems]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
- useEffect(()=>{if(!user){navigate("/login");return;}(async()=>{try{const d=await api("/api/notifications");setItems(unwrap(d,["notifications","data","results"]));}catch(e){console.error(e);setError("Unable to load notifications.");}finally{setLoading(false);}})();},[user,navigate]);
+ const navigate=useNavigate();
+ // Identity from the shared hook only — the page no longer re-parses the
+ // cached `user` blob out of localStorage.
+ const {user, linked, loading:identityLoading, error:identityError}=useIdentity();
+ const [items,setItems]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
+ // Stable boolean so the fetch does not run again when the hook swaps the
+ // cached identity for the /auth/me answer.
+ const hasUser=Boolean(user);
+
+ // `GET /api/notifications` is audience-scoped server-side (global, this
+ // role, or addressed to this user id), so whatever comes back is already
+ // this student's own mail. No client-side guessing at the audience.
+ useEffect(()=>{
+  if(identityLoading)return;
+  if(!hasUser){navigate("/login");return;}
+  let cancelled=false;
+  (async()=>{
+   try{
+    const d=await api("/api/notifications");
+    if(!cancelled)setItems(unwrap(d,["notifications","data","results"]));
+   }catch(e){
+    console.error(e);
+    if(!cancelled)setError("Unable to load notifications.");
+   }finally{
+    if(!cancelled)setLoading(false);
+   }
+  })();
+  return()=>{cancelled=true;};
+ },[identityLoading,hasUser,navigate]);
+
  // No "mark as read" action here: Notification.isRead is a single global flag
  // (no recipient/readBy field) and PUT /api/notifications/:id/read has no owner
  // check, so a student marking one read would hide it for every user.
+ // `audienceFilter` on that route is a visibility test, not an ownership test:
+ // every student matches {audience:"student"} and every user matches
+ // {audience:"all"}, so the flip would land on the one shared document.
+ // Per-user read state (a `readBy` array on Notification, $addToSet in the
+ // route, unread derived per caller) has to exist before this page can offer
+ // the control.
  const unread=items.filter(n=>!n.isRead).length;
- if(loading)return <div style={styles.loading}>Loading notifications...</div>;
- return <Page active="/student-portal/notifications" navigate={navigate} count={unread||items.length}>
+ if(identityLoading||loading)return <div style={styles.loading}>Loading notifications...</div>;
+ return <Page active="/student-portal/notifications" navigate={navigate} count={unread}>
   <div style={styles.header}><div><h1 style={styles.title}>Notifications</h1><p style={styles.subtitle}>Important updates and announcements</p></div><button style={styles.button} onClick={()=>navigate("/student-portal")}>Dashboard →</button></div>
   {error&&<div style={styles.error}>{error}</div>}
+  {!error&&identityError&&<div style={styles.error}>{identityError}</div>}
+  {/* An unlinked student still receives role-wide announcements, so the
+      list stays — but the page says plainly that the account has no
+      student record behind it. */}
+  {!linked&&<div style={styles.error}>{NOT_LINKED}</div>}
   <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>All Notifications</h2><p style={styles.muted}>{unread} unread</p></div></div><div style={styles.content}>
-   {items.length?items.map((n,i)=>{const isUnread=!n.isRead;return <div key={getId(n._id||n.id)||i} style={{...styles.notification,...(isUnread?styles.unread:{})}}>
-    <div style={{display:"flex",justifyContent:"space-between",gap:12}}><strong>{n.title||n.subject||n.type||"Notification"}</strong>{isUnread&&<span style={styles.badge}>NEW</span>}</div>
+   {items.length?items.map((n,i)=>{const isUnread=!n.isRead;const id=getId(n._id||n.id);return <div key={id||i} style={{...styles.notification,...(isUnread?styles.unread:{})}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><strong>{n.title||n.subject||n.type||"Notification"}</strong>{isUnread&&<span style={styles.badge}>NEW</span>}</div>
     <p style={{color:"#c7cbe3",lineHeight:1.6,margin:"9px 0 5px"}}>{n.message||n.content||n.description||"No message available."}</p>
     {(n.createdAt||n.date)&&<small style={styles.muted}>{new Date(n.createdAt||n.date).toLocaleString()}</small>}
    </div>}) : <div style={styles.empty}>No notifications found.</div>}

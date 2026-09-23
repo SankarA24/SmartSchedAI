@@ -74,197 +74,211 @@ const Nav = ({active, navigate, count}) => (
 
 const Page = ({active, navigate, children, count=0}) => <div style={styles.app}><Nav active={active} navigate={navigate} count={count}/><main style={styles.main}>{children}</main></div>;
 
-const userFromStorage = () => {
-  try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; }
-};
-
 import React,{useEffect,useState} from "react";
 import {useNavigate} from "react-router-dom";
+
+import useIdentity from "@/hooks/useIdentity";
+
+const NOT_LINKED = "Profile not linked — contact your administrator";
+
+// Rendered for anything the record genuinely does not carry. There are no
+// invented values on this page any more: no default department, no default
+// semester, no current-year guess, and no reading of some other cohort's
+// timetable to fill the blanks.
+const UNKNOWN = "—";
+
+const show = (value) =>
+  value === undefined || value === null || value === "" ? UNKNOWN : String(value);
 
 function MyProfile() {
   const navigate = useNavigate();
 
-  const [user, setUser] = useState(userFromStorage());
-  const [timetable, setTimetable] = useState(null);
+  // The single source of truth for who is signed in: `GET /api/auth/me`,
+  // which re-reads the linked Student doc server-side.
+  const {
+    user,
+    student,
+    linked,
+    loading: identityLoading,
+    error: identityError,
+    refresh,
+  } = useIdentity();
+
+  // Only the two fields `PUT /api/students/me` accepts are editable; the
+  // academic fields are read-only because only an admin may move a student
+  // between cohorts.
+  const [form, setForm] = useState({ phone: "", section: "" });
+  const [profile, setProfile] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Load timetable information for department / semester / year
+  // Queries raised by this student (`GET /api/queries` returns own only).
+  const [queries, setQueries] = useState([]);
+  const [queryForm, setQueryForm] = useState({ subject: "", message: "" });
+  const [queryBusy, setQueryBusy] = useState(false);
+  const [queryNotice, setQueryNotice] = useState("");
+  const [queryError, setQueryError] = useState("");
+
   useEffect(() => {
-    if (!user) {
+    if (!identityLoading && !user) {
       navigate("/login");
-      return;
     }
+  }, [identityLoading, user, navigate]);
 
-    const loadProfileData = async () => {
+  // Seed the editable fields from the linked Student doc whenever identity
+  // resolves or is refreshed.
+  useEffect(() => {
+    if (!student) return;
+    setProfile(student);
+    setForm({
+      phone: student.phone ?? "",
+      section: student.section ?? "",
+    });
+  }, [student]);
+
+  // Stable boolean so the query list is not refetched when the hook swaps
+  // the cached identity for the /auth/me answer.
+  const hasUser = Boolean(user);
+
+  useEffect(() => {
+    if (identityLoading || !hasUser) return;
+    let cancelled = false;
+
+    (async () => {
       try {
-        setLoading(true);
-        setError("");
-
-        const timetableData = await api("/api/timetables");
-
-        const timetables = unwrap(timetableData, [
-          "timetables",
-          "data",
-          "results",
-        ]);
-
-        // Select the first available timetable
-        if (timetables.length > 0) {
-          setTimetable(timetables[0]);
-        }
+        const data = await api("/api/queries");
+        if (!cancelled) setQueries(unwrap(data, ["queries", "data", "results"]));
       } catch (err) {
-        console.error("Profile data error:", err);
-        setError("Unable to load academic information.");
-      } finally {
-        setLoading(false);
+        console.error("Queries error:", err);
+        if (!cancelled) setQueryError("Unable to load your queries.");
       }
-    };
+    })();
 
-    loadProfileData();
-  }, [user, navigate]);
+    return () => {
+      cancelled = true;
+    };
+  }, [identityLoading, hasUser]);
+
+  if (identityLoading) {
+    return <div style={styles.loading}>Loading profile...</div>;
+  }
 
   if (!user) {
     return <div style={styles.loading}>Loading profile...</div>;
   }
 
-  if (loading) {
-    return (
-      <Page
-        active="/student-portal/profile"
-        navigate={navigate}
-      >
-        <div style={styles.loading}>
-          Loading profile...
-        </div>
-      </Page>
-    );
-  }
+  // Academic fields: straight from the resolved identity / linked Student
+  // doc, never defaulted.
+  const department = user.department ?? profile?.department ?? null;
+  const semester = user.semester ?? profile?.semester ?? null;
+  const year = user.year ?? profile?.year ?? null;
+  const academicYear = user.academicYear ?? profile?.academicYear ?? null;
+  const registerNumber = profile?.registerNumber ?? null;
+  const name = user.name ?? profile?.name ?? null;
+  const email = user.email ?? profile?.email ?? null;
+  const role = user.role ?? "student";
 
-  /*
-   * Get academic information.
-   *
-   * Priority:
-   * 1. User object
-   * 2. Timetable metadata
-   */
-  const department =
-    user.department ||
-    user.departmentName ||
-    timetable?.department ||
-    timetable?.metadata?.department ||
-    "Computer Science";
+  // Persist through the backend — this used to write to localStorage only,
+  // so every edit was wiped by the next logout.
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await api("/api/students/me", {
+        method: "PUT",
+        body: { phone: form.phone, section: form.section },
+      });
 
-  const semester =
-    user.semester ||
-    user.semesterNumber ||
-    user.currentSemester ||
-    timetable?.semester ||
-    timetable?.metadata?.semester ||
-    "1";
+      setProfile(updated);
+      setForm({
+        phone: updated?.phone ?? "",
+        section: updated?.section ?? "",
+      });
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2200);
 
-  const year =
-    user.year ||
-    timetable?.year ||
-    timetable?.metadata?.year ||
-    "2026";
-
-  const studentId =
-    user.studentId ||
-    user.registrationNumber ||
-    user.regNo ||
-    user.rollNumber ||
-    "—";
-
-  const phone =
-    user.phone ||
-    user.mobile ||
-    user.phoneNumber ||
-    "—";
-
-  const role =
-    user.role ||
-    "student";
-
-  const name =
-    user.name ||
-    user.fullName ||
-    "Student";
-
-  const email =
-    user.email ||
-    "—";
-
-  // Save profile locally
-  const save = () => {
-    const updatedUser = {
-      ...user,
-      name,
-      email,
-      department,
-      semester,
-      phone,
-      studentId,
-      year,
-      role,
-    };
-
-    localStorage.setItem(
-      "user",
-      JSON.stringify(updatedUser)
-    );
-
-    setUser(updatedUser);
-    setSaved(true);
-    setEditing(false);
-
-    setTimeout(() => {
-      setSaved(false);
-    }, 2200);
+      // Pull the authoritative copy back so the cached identity and any
+      // other page agree with what was just written.
+      refresh();
+    } catch (err) {
+      console.error("Profile save error:", err);
+      setError(
+        err?.response?.data?.error || "Unable to save your profile. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const cancelEdit = () => {
-    setUser(userFromStorage());
+    setForm({
+      phone: profile?.phone ?? "",
+      section: profile?.section ?? "",
+    });
     setEditing(false);
+    setError("");
   };
 
-  const renderField = (
-    label,
-    key,
-    value,
-    editable = false
-  ) => {
-    return (
-      <div style={styles.profileBox}>
-        <span style={styles.label}>
-          {label}
-        </span>
+  const submitQuery = async (event) => {
+    event.preventDefault();
+    const subject = queryForm.subject.trim();
+    const message = queryForm.message.trim();
 
-        {editing && editable ? (
-          <input
-            style={styles.input}
-            value={value ?? ""}
-            onChange={(e) =>
-              setUser({
-                ...user,
-                [key]: e.target.value,
-              })
-            }
-          />
-        ) : (
-          <div style={styles.value}>
-            {value !== undefined &&
-            value !== null &&
-            value !== ""
-              ? value
-              : "—"}
-          </div>
-        )}
-      </div>
-    );
+    setQueryNotice("");
+    setQueryError("");
+
+    if (!subject || !message) {
+      setQueryError("A subject and a message are both required.");
+      return;
+    }
+
+    setQueryBusy(true);
+    try {
+      const created = await api("/api/queries", {
+        method: "POST",
+        body: { subject, message },
+      });
+
+      setQueries((list) => [created, ...list]);
+      setQueryForm({ subject: "", message: "" });
+      setQueryNotice("Your query has been sent to the administrator.");
+      setTimeout(() => setQueryNotice(""), 2600);
+    } catch (err) {
+      console.error("Query submit error:", err);
+      setQueryError(
+        err?.response?.data?.error || "Unable to send your query. Please try again."
+      );
+    } finally {
+      setQueryBusy(false);
+    }
   };
+
+  // Read-only field.
+  const renderField = (label, value) => (
+    <div style={styles.profileBox}>
+      <span style={styles.label}>{label}</span>
+      <div style={styles.value}>{show(value)}</div>
+    </div>
+  );
+
+  // Editable field — persisted by `save()` through PUT /api/students/me.
+  const renderEditableField = (label, key) => (
+    <div style={styles.profileBox}>
+      <span style={styles.label}>{label}</span>
+      {editing ? (
+        <input
+          style={styles.input}
+          value={form[key] ?? ""}
+          onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        />
+      ) : (
+        <div style={styles.value}>{show(form[key])}</div>
+      )}
+    </div>
+  );
 
   return (
     <Page
@@ -290,7 +304,7 @@ function MyProfile() {
             gap: 10,
           }}
         >
-          {!editing ? (
+          {linked && (!editing ? (
             <button
               style={styles.button}
               onClick={() => setEditing(true)}
@@ -302,6 +316,7 @@ function MyProfile() {
               <button
                 style={styles.button}
                 onClick={cancelEdit}
+                disabled={saving}
               >
                 Cancel
               </button>
@@ -313,11 +328,12 @@ function MyProfile() {
                     "rgba(37,99,235,.35)",
                 }}
                 onClick={save}
+                disabled={saving}
               >
-                Save Changes
+                {saving ? "Saving..." : "Save Changes"}
               </button>
             </>
-          )}
+          ))}
         </div>
       </div>
 
@@ -325,6 +341,12 @@ function MyProfile() {
       {error && (
         <div style={styles.error}>
           {error}
+        </div>
+      )}
+
+      {!error && identityError && (
+        <div style={styles.error}>
+          {identityError}
         </div>
       )}
 
@@ -349,81 +371,171 @@ function MyProfile() {
             </h2>
 
             <p style={styles.muted}>
-              Information from your student account
+              {linked
+                ? "Academic details come from your student record; only phone and section are editable."
+                : "No student record is linked to this account."}
             </p>
           </div>
         </div>
 
         <div style={styles.content}>
-          <div style={styles.profileGrid}>
+          {!linked ? (
+            <div style={styles.empty}>{NOT_LINKED}</div>
+          ) : (
+            <div style={styles.profileGrid}>
 
-            {/* NAME */}
-            {renderField(
-              "Name",
-              "name",
-              user.name ||
-                user.fullName ||
-                "Student",
-              true
+              {/* NAME */}
+              {renderField("Name", name)}
+
+              {/* EMAIL */}
+              {renderField("Email", email)}
+
+              {/* REGISTER NUMBER */}
+              {renderField("Register Number", registerNumber)}
+
+              {/* DEPARTMENT */}
+              {renderField("Department", department)}
+
+              {/* SEMESTER */}
+              {renderField("Semester", semester)}
+
+              {/* YEAR */}
+              {renderField("Year", year)}
+
+              {/* ACADEMIC YEAR */}
+              {renderField("Academic Year", academicYear)}
+
+              {/* ROLE */}
+              {renderField("Role", role)}
+
+              {/* SECTION (editable) */}
+              {renderEditableField("Section", "section")}
+
+              {/* PHONE (editable) */}
+              {renderEditableField("Phone", "phone")}
+
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* QUERIES CARD */}
+      <div style={styles.card}>
+        <div style={styles.cardHead}>
+          <div>
+            <h2 style={styles.cardTitle}>
+              Ask a Query
+            </h2>
+
+            <p style={styles.muted}>
+              Send a question to the administrator and read their replies
+            </p>
+          </div>
+        </div>
+
+        <div style={styles.content}>
+          {queryError && (
+            <div style={styles.error}>
+              {queryError}
+            </div>
+          )}
+
+          {queryNotice && (
+            <div
+              style={{
+                ...styles.notification,
+                ...styles.unread,
+              }}
+            >
+              {queryNotice}
+            </div>
+          )}
+
+          <form onSubmit={submitQuery}>
+            <div style={{ marginBottom: 12 }}>
+              <span style={styles.label}>Subject</span>
+              <input
+                style={styles.input}
+                value={queryForm.subject}
+                placeholder="What is your query about?"
+                onChange={(e) =>
+                  setQueryForm({ ...queryForm, subject: e.target.value })
+                }
+              />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <span style={styles.label}>Message</span>
+              <textarea
+                style={{ ...styles.input, minHeight: 96, resize: "vertical" }}
+                value={queryForm.message}
+                placeholder="Describe your query"
+                onChange={(e) =>
+                  setQueryForm({ ...queryForm, message: e.target.value })
+                }
+              />
+            </div>
+
+            <button
+              type="submit"
+              style={{
+                ...styles.button,
+                background: "rgba(37,99,235,.35)",
+              }}
+              disabled={queryBusy}
+            >
+              {queryBusy ? "Sending..." : "Send Query"}
+            </button>
+          </form>
+
+          <div style={{ marginTop: 22 }}>
+            <span style={styles.label}>Your Queries</span>
+
+            {queries.length ? (
+              queries.map((q, i) => (
+                <div
+                  key={q?._id || q?.id || i}
+                  style={styles.notification}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <strong>{q?.subject || "Query"}</strong>
+                    <span style={styles.badge}>
+                      {String(q?.status || "open").toUpperCase()}
+                    </span>
+                  </div>
+
+                  <p
+                    style={{
+                      color: "#c7cbe3",
+                      lineHeight: 1.6,
+                      margin: "9px 0 5px",
+                    }}
+                  >
+                    {q?.message}
+                  </p>
+
+                  {q?.reply && (
+                    <p style={{ color: "#ddd6fe", lineHeight: 1.6, margin: "0 0 5px" }}>
+                      <strong>Reply:</strong> {q.reply}
+                    </p>
+                  )}
+
+                  {q?.createdAt && (
+                    <small style={styles.muted}>
+                      {new Date(q.createdAt).toLocaleString()}
+                    </small>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div style={styles.empty}>You have not raised any queries yet.</div>
             )}
-
-            {/* EMAIL */}
-            {renderField(
-              "Email",
-              "email",
-              user.email ||
-                "—",
-              true
-            )}
-
-            {/* DEPARTMENT */}
-            {renderField(
-              "Department",
-              "department",
-              department,
-              false
-            )}
-
-            {/* SEMESTER */}
-            {renderField(
-              "Semester",
-              "semester",
-              semester,
-              false
-            )}
-
-            {/* PHONE */}
-            {renderField(
-              "Phone",
-              "phone",
-              phone,
-              true
-            )}
-
-            {/* ROLE */}
-            {renderField(
-              "Role",
-              "role",
-              role,
-              false
-            )}
-
-            {/* STUDENT ID */}
-            {renderField(
-              "Student ID",
-              "studentId",
-              studentId,
-              true
-            )}
-
-            {/* YEAR */}
-            {renderField(
-              "Year",
-              "year",
-              year,
-              false
-            )}
-
           </div>
         </div>
       </div>

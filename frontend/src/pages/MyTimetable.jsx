@@ -1,68 +1,221 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import client from "@/lib/api";
 
-/* =========================================================
-   HELPERS
-========================================================= */
+import useIdentity from "@/hooks/useIdentity";
+import { useTimetableData } from "@/hooks/useTimetableData";
+
+/* ============================================================
+   COHORT SCOPING
+   ------------------------------------------------------------
+   This block is deliberately IDENTICAL in pages/StudentPortal.jsx
+   and pages/MyTimetable.jsx. The dashboard and the timetable page
+   used to match timetables with two different sets of rules, so
+   they could show the same student two different timetables with
+   nothing on screen saying they disagreed. Both now read the
+   same identity (useIdentity → GET /api/auth/me) and run the
+   same selection over the same server-scoped GET /api/timetables.
+   Change one copy, change the other.
+
+   There are NO cohort defaults here on purpose: no default
+   department, no default semester, no default academic year
+   taken from the system clock. An unknown field means
+   "unknown", and a student whose cohort cannot be resolved
+   gets an empty state — never somebody else's timetable.
+============================================================ */
+
+const isBlank = (value) =>
+  value === undefined || value === null || value === "";
+
+const normalizeText = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const normalizeSemester = (value) => {
+  const match = String(value ?? "").match(/\d+/);
+  return match ? match[0] : "";
+};
 
 const getId = (value) => {
-  if (!value) return null;
+  if (value === null || value === undefined) return null;
 
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
   }
 
   if (value.$oid) return String(value.$oid);
-
   if (value._id) return getId(value._id);
-
   if (value.id) return getId(value.id);
 
-  const s =
-    typeof value.toString === "function"
-      ? value.toString()
-      : "";
-
-  return s && s !== "[object Object]"
-    ? String(s)
-    : null;
-};
-
-const api = async (path, options = {}) => {
-  const response = await client.request({
-    url: path.replace(/^\/api/, ""),
-    method: options.method || "GET",
-    data: options.body,
-    headers: options.headers,
-  });
-
-  return response.data;
-};
-
-const unwrap = (data, keys = []) => {
-  if (Array.isArray(data)) {
-    return data;
-  }
-
-  for (const key of keys) {
-    if (Array.isArray(data?.[key])) {
-      return data[key];
+  if (typeof value.toString === "function") {
+    const result = value.toString();
+    if (result && result !== "[object Object]") {
+      return String(result);
     }
   }
 
-  return [];
+  return null;
 };
 
-const getStoredUser = () => {
-  try {
-    return JSON.parse(
-      localStorage.getItem("user") || "null"
-    );
-  } catch {
-    return null;
-  }
+const normalizeDay = (day) => {
+  if (!day) return "";
+
+  const value = String(day).trim().toLowerCase();
+
+  const days = {
+    monday: "Monday",
+    tuesday: "Tuesday",
+    wednesday: "Wednesday",
+    thursday: "Thursday",
+    friday: "Friday",
+    saturday: "Saturday",
+    sunday: "Sunday",
+  };
+
+  return days[value] || String(day);
 };
+
+const formatTime = (time) => {
+  if (!time) return "";
+
+  if (typeof time !== "string") {
+    return String(time);
+  }
+
+  return time.length >= 5 ? time.substring(0, 5) : time;
+};
+
+/**
+ * Does this user have enough profile to name a cohort at all?
+ * `department` is the minimum; without it there is nothing to scope to.
+ */
+function hasCohort(identity) {
+  return Boolean(identity && !isBlank(identity.department));
+}
+
+/**
+ * Query params for GET /api/timetables, built only from what the profile
+ * actually says. The server rebuilds the filter from the JWT for a student
+ * and ignores these (see backend/routes/timetableRoute.js#buildStudentFilter),
+ * so they are a statement of intent, never the thing that keeps other
+ * cohorts out.
+ */
+function cohortFilters(identity) {
+  if (!hasCohort(identity)) return undefined;
+
+  const filters = { department: identity.department, status: "published" };
+
+  if (!isBlank(identity.semester)) filters.semester = String(identity.semester);
+  if (!isBlank(identity.year)) filters.year = identity.year;
+  if (!isBlank(identity.academicYear)) filters.academicYear = identity.academicYear;
+
+  return filters;
+}
+
+/**
+ * Client-side second layer, mirroring the server's `matchesStudentGroup`.
+ * Defence in depth: the server already returns only this student's cohort,
+ * published; this re-checks every row before it is rendered.
+ */
+function matchesCohort(timetable, identity) {
+  if (!timetable || !hasCohort(identity)) return false;
+
+  if (normalizeText(timetable.department) !== normalizeText(identity.department)) {
+    return false;
+  }
+
+  if (
+    !isBlank(identity.semester) &&
+    normalizeSemester(timetable.semester) !== normalizeSemester(identity.semester)
+  ) {
+    return false;
+  }
+
+  // Legacy docs (pre `academicYear`) keep the calendar year in `year`.
+  const legacy = isBlank(timetable.academicYear);
+
+  if (
+    !legacy &&
+    !isBlank(identity.year) &&
+    Number(timetable.year) !== Number(identity.year)
+  ) {
+    return false;
+  }
+
+  if (
+    !isBlank(identity.academicYear) &&
+    Number(legacy ? timetable.year : timetable.academicYear) !==
+      Number(identity.academicYear)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * The one timetable this student is shown, or null.
+ *
+ * Published first, then most recently updated. There is deliberately no
+ * "any non-empty timetable" fallback: if nothing matches the student's own
+ * cohort the answer is null and the page says so.
+ */
+function selectCohortTimetable(timetables, identity) {
+  const candidates = (Array.isArray(timetables) ? timetables : []).filter(
+    (timetable) =>
+      Array.isArray(timetable?.schedule) && matchesCohort(timetable, identity)
+  );
+
+  if (candidates.length === 0) return null;
+
+  const statusRank = (timetable) =>
+    normalizeText(timetable?.status) === "published" ? 0 : 1;
+
+  const ranked = [...candidates].sort((a, b) => {
+    const byStatus = statusRank(a) - statusRank(b);
+    if (byStatus !== 0) return byStatus;
+
+    const dateA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const dateB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+
+    return dateB - dateA;
+  });
+
+  return ranked[0] || null;
+}
+
+/** Schedule entries of the chosen timetable, exact duplicates removed. */
+function uniqueEntries(schedule) {
+  const entries = Array.isArray(schedule) ? schedule : [];
+
+  const result = [];
+  const seen = new Set();
+
+  entries.forEach((entry) => {
+    const courseId = getId(
+      entry.courseId || entry.courseID || entry.course_id || entry.course
+    );
+
+    const roomId = getId(
+      entry.roomId || entry.roomID || entry.room_id || entry.room
+    );
+
+    const key = [
+      courseId || entry.courseName || "course",
+      roomId || entry.roomName || "room",
+      normalizeDay(entry.day || entry.weekday),
+      formatTime(entry.startTime || entry.start),
+      formatTime(entry.endTime || entry.end),
+    ].join("|");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(entry);
+    }
+  });
+
+  return result;
+}
 
 /* =========================================================
    STYLES
@@ -516,156 +669,46 @@ const Page = ({
 function MyTimetable() {
   const navigate = useNavigate();
 
-  const [user] = useState(getStoredUser);
+  // Identity comes from the shared hook only — never from an inline
+  // localStorage read.
+  const {
+    user,
+    linked,
+    loading: identityLoading,
+    error: identityError,
+  } = useIdentity();
 
-  const [courses, setCourses] = useState([]);
-  const [rooms, setRooms] = useState([]);
-  const [faculties, setFaculties] = useState([]);
-  const [timetables, setTimetables] = useState([]);
+  const filters = useMemo(() => cohortFilters(user), [user]);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  // Same server-scoped GET /api/timetables the dashboard uses, through the
+  // same hook, so the two pages cannot disagree about this student.
+  const {
+    timetables,
+    courses,
+    faculty,
+    rooms,
+    loading: dataLoading,
+    error: dataError,
+  } = useTimetableData(filters);
 
   /* -------------------------------------------------------
-     LOAD DATA
+     NO SESSION → LOGIN
   ------------------------------------------------------- */
 
   useEffect(() => {
-    if (!user) {
+    if (!identityLoading && !user) {
       navigate("/login");
-      return;
     }
-
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError("");
-
-        const [
-          coursesData,
-          roomsData,
-          facultiesData,
-          timetablesData,
-        ] = await Promise.all([
-          api("/api/courses"),
-
-          api("/api/rooms"),
-
-          // IMPORTANT:
-          // Backend uses /api/faculty
-          // NOT /api/faculties
-          api("/api/faculty"),
-
-          api("/api/timetables"),
-        ]);
-
-        setCourses(
-          unwrap(coursesData, [
-            "courses",
-            "data",
-            "results",
-          ])
-        );
-
-        setRooms(
-          unwrap(roomsData, [
-            "rooms",
-            "data",
-            "results",
-          ])
-        );
-
-        setFaculties(
-          unwrap(facultiesData, [
-            "faculties",
-            "faculty",
-            "data",
-            "results",
-          ])
-        );
-
-        setTimetables(
-          unwrap(timetablesData, [
-            "timetables",
-            "data",
-            "results",
-          ])
-        );
-      } catch (err) {
-        console.error(
-          "Timetable loading error:",
-          err
-        );
-
-        setError(
-          "Unable to load timetable data. Please make sure the backend server is running."
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, [user, navigate]);
+  }, [identityLoading, user, navigate]);
 
   /* -------------------------------------------------------
-     SELECT CORRECT TIMETABLE
+     THE STUDENT'S OWN TIMETABLE
   ------------------------------------------------------- */
 
-  const selected = useMemo(() => {
-    const department =
-      user?.department ||
-      user?.departmentName ||
-      "Computer Science";
-
-    const semester = String(
-      user?.semester ||
-        user?.semesterNumber ||
-        user?.currentSemester ||
-        "1"
-    );
-
-    const year = String(
-      user?.year ||
-        new Date().getFullYear()
-    );
-
-    const matches = timetables.filter(
-      (timetable) =>
-        String(
-          timetable.department || ""
-        ).toLowerCase() ===
-          department.toLowerCase() &&
-        String(
-          timetable.semester || ""
-        ) === semester &&
-        String(
-          timetable.year || ""
-        ) === year
-    );
-
-    return (
-      matches.find((timetable) =>
-        [
-          "published",
-          "approved",
-          "active",
-        ].includes(
-          String(
-            timetable.status || ""
-          ).toLowerCase()
-        )
-      ) ||
-      matches[0] ||
-      timetables.find(
-        (timetable) =>
-          Array.isArray(
-            timetable.schedule
-          )
-      ) ||
-      null
-    );
-  }, [timetables, user]);
+  const selected = useMemo(
+    () => selectCohortTimetable(timetables, user),
+    [timetables, user]
+  );
 
   /* -------------------------------------------------------
      LOOKUP FUNCTIONS
@@ -690,10 +733,10 @@ function MyTimetable() {
   };
 
   const facultyById = (id) => {
-    return faculties.find(
-      (faculty) =>
+    return faculty.find(
+      (member) =>
         getId(
-          faculty._id || faculty.id
+          member._id || member.id
         ) === getId(id)
     );
   };
@@ -703,14 +746,6 @@ function MyTimetable() {
   ------------------------------------------------------- */
 
   const entries = useMemo(() => {
-    if (
-      !Array.isArray(
-        selected?.schedule
-      )
-    ) {
-      return [];
-    }
-
     const dayOrder = {
       Monday: 1,
       Tuesday: 2,
@@ -721,15 +756,15 @@ function MyTimetable() {
       Sunday: 7,
     };
 
-    return selected.schedule
+    return uniqueEntries(selected?.schedule)
       .map((entry, index) => ({
         ...entry,
         _index: index,
       }))
       .sort((a, b) => {
         const dayDifference =
-          (dayOrder[a.day] || 99) -
-          (dayOrder[b.day] || 99);
+          (dayOrder[normalizeDay(a.day)] || 99) -
+          (dayOrder[normalizeDay(b.day)] || 99);
 
         if (dayDifference !== 0) {
           return dayDifference;
@@ -746,10 +781,37 @@ function MyTimetable() {
   }, [selected]);
 
   /* -------------------------------------------------------
+     PROFILE VALUES — no invented defaults
+  ------------------------------------------------------- */
+
+  const studentDepartment = user?.department || "—";
+
+  const studentSemester = isBlank(user?.semester)
+    ? "—"
+    : String(user.semester);
+
+  const studentAcademicYear = isBlank(user?.academicYear)
+    ? "—"
+    : String(user.academicYear);
+
+  const timetablesError = dataError?.timetables || null;
+
+  const errorMessage = timetablesError
+    ? `Unable to load your timetable: ${timetablesError}`
+    : identityError || "";
+
+  // Why there is nothing to show, when there is nothing to show.
+  const emptyReason = !linked
+    ? "Profile not linked — contact your administrator"
+    : !hasCohort(user)
+      ? "Your student profile has no department set — contact your administrator"
+      : "No published timetable for your department and semester yet.";
+
+  /* -------------------------------------------------------
      LOADING
   ------------------------------------------------------- */
 
-  if (loading) {
+  if (identityLoading || dataLoading) {
     return (
       <div style={styles.loading}>
         Loading timetable...
@@ -793,252 +855,268 @@ function MyTimetable() {
 
       {/* ERROR */}
 
-      {error && (
+      {errorMessage && (
         <div style={styles.error}>
-          {error}
+          {errorMessage}
         </div>
       )}
 
-      {/* TIMETABLE CARD */}
+      {/* UNLINKED PROFILE — no data is shown at all */}
 
-      <div style={styles.card}>
-        {/* CARD HEADER */}
+      {!linked ? (
+        <div style={styles.card}>
+          <div style={styles.cardHead}>
+            <div>
+              <h2 style={styles.cardTitle}>
+                Profile not linked
+              </h2>
 
-        <div style={styles.cardHead}>
-          <div>
-            <h2 style={styles.cardTitle}>
-              {selected?.name ||
-                "Current Timetable"}
-            </h2>
-
-            <p style={styles.muted}>
-              {selected?.department ||
-                user?.department ||
-                "Computer Science"}{" "}
-              · Semester{" "}
-              {selected?.semester ||
-                user?.semester ||
-                "1"}{" "}
-              ·{" "}
-              {selected?.year ||
-                new Date().getFullYear()}
-            </p>
+              <p style={styles.muted}>
+                Your account is not connected to a student record
+              </p>
+            </div>
           </div>
 
-          <span style={styles.badge}>
-            {selected?.status ||
-              "active"}
-          </span>
+          <div style={styles.empty}>
+            Profile not linked — contact your administrator
+          </div>
         </div>
+      ) : (
+        /* TIMETABLE CARD */
 
-        {/* RECTANGULAR TIMETABLE */}
+        <div style={styles.card}>
+          {/* CARD HEADER */}
 
-        {entries.length > 0 ? (
-          <div
-            style={
-              styles.timetableContainer
-            }
-          >
-            {entries.map(
-              (entry, index) => {
-                const course =
-                  courseById(
-                    entry.courseId ||
-                      entry.course
-                  );
+          <div style={styles.cardHead}>
+            <div>
+              <h2 style={styles.cardTitle}>
+                {selected?.name ||
+                  "My Timetable"}
+              </h2>
 
-                const room =
-                  roomById(
-                    entry.roomId ||
-                      entry.room
-                  );
+              <p style={styles.muted}>
+                {studentDepartment} · Semester{" "}
+                {studentSemester} ·{" "}
+                {studentAcademicYear}
+              </p>
+            </div>
 
-                const faculty =
-                  facultyById(
-                    entry.facultyId ||
-                      entry.faculty
-                  );
-
-                const courseName =
-                  course?.name ||
-                  course?.title ||
-                  entry.courseName ||
-                  "Course";
-
-                const courseCode =
-                  course?.code ||
-                  entry.courseCode ||
-                  "—";
-
-                const facultyName =
-                  faculty?.name ||
-                  faculty?.fullName ||
-                  faculty?.facultyName ||
-                  entry.facultyName ||
-                  entry.faculty?.name ||
-                  "—";
-
-                const roomName =
-                  room?.name ||
-                  room?.roomNumber ||
-                  room?.number ||
-                  entry.roomName ||
-                  "—";
-
-                return (
-                  <div
-                    key={
-                      entry._id ||
-                      entry.id ||
-                      index
-                    }
-                    style={
-                      styles.timetableRow
-                    }
-                  >
-                    {/* DAY */}
-
-                    <div
-                      style={
-                        styles.dayBox
-                      }
-                    >
-                      <span
-                        style={
-                          styles.dayLabel
-                        }
-                      >
-                        DAY
-                      </span>
-
-                      <span
-                        style={
-                          styles.dayValue
-                        }
-                      >
-                        {entry.day ||
-                          "—"}
-                      </span>
-                    </div>
-
-                    {/* TIME */}
-
-                    <div
-                      style={
-                        styles.timeBox
-                      }
-                    >
-                      <span
-                        style={
-                          styles.timeLabel
-                        }
-                      >
-                        TIME
-                      </span>
-
-                      <span
-                        style={
-                          styles.timeValue
-                        }
-                      >
-                        {entry.startTime ||
-                          "—"}{" "}
-                        -{" "}
-                        {entry.endTime ||
-                          "—"}
-                      </span>
-                    </div>
-
-                    {/* COURSE */}
-
-                    <div
-                      style={
-                        styles.courseBox
-                      }
-                    >
-                      <span
-                        style={
-                          styles.courseLabel
-                        }
-                      >
-                        COURSE
-                      </span>
-
-                      <span
-                        style={
-                          styles.courseName
-                        }
-                      >
-                        {courseName}
-                      </span>
-
-                      <span
-                        style={
-                          styles.courseCode
-                        }
-                      >
-                        {courseCode}
-                      </span>
-                    </div>
-
-                    {/* FACULTY */}
-
-                    <div
-                      style={
-                        styles.facultyBox
-                      }
-                    >
-                      <span
-                        style={
-                          styles.facultyLabel
-                        }
-                      >
-                        FACULTY
-                      </span>
-
-                      <span
-                        style={
-                          styles.facultyName
-                        }
-                      >
-                        {facultyName}
-                      </span>
-                    </div>
-
-                    {/* ROOM */}
-
-                    <div
-                      style={
-                        styles.roomBox
-                      }
-                    >
-                      <span
-                        style={
-                          styles.roomLabel
-                        }
-                      >
-                        ROOM
-                      </span>
-
-                      <span
-                        style={
-                          styles.roomName
-                        }
-                      >
-                        {roomName}
-                      </span>
-                    </div>
-                  </div>
-                );
-              }
+            {selected && (
+              <span style={styles.badge}>
+                {selected.status}
+              </span>
             )}
           </div>
-        ) : (
-          <div style={styles.empty}>
-            No timetable entries found.
-          </div>
-        )}
-      </div>
+
+          {/* RECTANGULAR TIMETABLE */}
+
+          {entries.length > 0 ? (
+            <div
+              style={
+                styles.timetableContainer
+              }
+            >
+              {entries.map(
+                (entry, index) => {
+                  const course =
+                    courseById(
+                      entry.courseId ||
+                        entry.course
+                    );
+
+                  const room =
+                    roomById(
+                      entry.roomId ||
+                        entry.room
+                    );
+
+                  const member =
+                    facultyById(
+                      entry.facultyId ||
+                        entry.faculty
+                    );
+
+                  const courseName =
+                    course?.name ||
+                    course?.title ||
+                    entry.courseName ||
+                    "Course";
+
+                  const courseCode =
+                    course?.code ||
+                    entry.courseCode ||
+                    "—";
+
+                  const facultyName =
+                    member?.name ||
+                    member?.fullName ||
+                    member?.facultyName ||
+                    entry.facultyName ||
+                    entry.faculty?.name ||
+                    "—";
+
+                  const roomName =
+                    room?.name ||
+                    room?.roomNumber ||
+                    room?.number ||
+                    entry.roomName ||
+                    "—";
+
+                  return (
+                    <div
+                      key={
+                        entry._id ||
+                        entry.id ||
+                        index
+                      }
+                      style={
+                        styles.timetableRow
+                      }
+                    >
+                      {/* DAY */}
+
+                      <div
+                        style={
+                          styles.dayBox
+                        }
+                      >
+                        <span
+                          style={
+                            styles.dayLabel
+                          }
+                        >
+                          DAY
+                        </span>
+
+                        <span
+                          style={
+                            styles.dayValue
+                          }
+                        >
+                          {entry.day ||
+                            "—"}
+                        </span>
+                      </div>
+
+                      {/* TIME */}
+
+                      <div
+                        style={
+                          styles.timeBox
+                        }
+                      >
+                        <span
+                          style={
+                            styles.timeLabel
+                          }
+                        >
+                          TIME
+                        </span>
+
+                        <span
+                          style={
+                            styles.timeValue
+                          }
+                        >
+                          {entry.startTime ||
+                            "—"}{" "}
+                          -{" "}
+                          {entry.endTime ||
+                            "—"}
+                        </span>
+                      </div>
+
+                      {/* COURSE */}
+
+                      <div
+                        style={
+                          styles.courseBox
+                        }
+                      >
+                        <span
+                          style={
+                            styles.courseLabel
+                          }
+                        >
+                          COURSE
+                        </span>
+
+                        <span
+                          style={
+                            styles.courseName
+                          }
+                        >
+                          {courseName}
+                        </span>
+
+                        <span
+                          style={
+                            styles.courseCode
+                          }
+                        >
+                          {courseCode}
+                        </span>
+                      </div>
+
+                      {/* FACULTY */}
+
+                      <div
+                        style={
+                          styles.facultyBox
+                        }
+                      >
+                        <span
+                          style={
+                            styles.facultyLabel
+                          }
+                        >
+                          FACULTY
+                        </span>
+
+                        <span
+                          style={
+                            styles.facultyName
+                          }
+                        >
+                          {facultyName}
+                        </span>
+                      </div>
+
+                      {/* ROOM */}
+
+                      <div
+                        style={
+                          styles.roomBox
+                        }
+                      >
+                        <span
+                          style={
+                            styles.roomLabel
+                          }
+                        >
+                          ROOM
+                        </span>
+
+                        <span
+                          style={
+                            styles.roomName
+                          }
+                        >
+                          {roomName}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          ) : (
+            <div style={styles.empty}>
+              {emptyReason}
+            </div>
+          )}
+        </div>
+      )}
     </Page>
   );
 }

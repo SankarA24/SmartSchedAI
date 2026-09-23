@@ -84,32 +84,96 @@ const Nav = ({active, navigate, count}) => (
 
 const Page = ({active, navigate, children, count=0}) => <div style={styles.app}><Nav active={active} navigate={navigate} count={count}/><main style={styles.main}>{children}</main></div>;
 
-const userFromStorage = () => {
-  try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; }
-};
-
 import React,{useEffect,useMemo,useState} from "react";
 import {useNavigate} from "react-router-dom";
 
+import useIdentity from "@/hooks/useIdentity";
+
+const NOT_LINKED = "Profile not linked — contact your administrator";
+
+// Case- and whitespace-insensitive text compare (departments are free text).
+const sameText = (a, b) =>
+  String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
+// Numeric compare that refuses to match when either side is not a number,
+// so a course with a missing/garbage semester is excluded rather than
+// silently accepted.
+const sameNumber = (a, b) => {
+  const left = Number(a);
+  const right = Number(b);
+  return Number.isFinite(left) && Number.isFinite(right) && left === right;
+};
+
 function MyCourses(){
- const navigate=useNavigate(),[user]=useState(userFromStorage),[courses,setCourses]=useState([]),[error,setError]=useState(""),[loading,setLoading]=useState(true);
- useEffect(()=>{if(!user){navigate("/login");return;}(async()=>{try{const data=await api("/api/courses");setCourses(unwrap(data,["courses","data","results"]));}catch(e){console.error(e);setError("Unable to load courses.");}finally{setLoading(false);}})();},[user,navigate]);
- const dept=user?.department||user?.departmentName||"";
- const sem=String(user?.semester||user?.semesterNumber||user?.currentSemester||"");
- const filtered=useMemo(()=>courses.filter(c=>(!dept||!c.department||String(c.department).toLowerCase()===String(dept).toLowerCase())&&(!sem||!c.semester||String(c.semester)===sem)),[courses,dept,sem]);
- const list=filtered.length?filtered:courses;
- if(loading)return <div style={styles.loading}>Loading courses...</div>;
+ const navigate=useNavigate();
+ // Identity comes from the shared hook (`GET /api/auth/me`), never from a
+ // hardcoded department or semester default: a student whose record carries
+ // no cohort now sees an empty list instead of a stranger's courses.
+ const {user, linked, loading:identityLoading, error:identityError}=useIdentity();
+ const [courses,setCourses]=useState([]),[error,setError]=useState(""),[loading,setLoading]=useState(true);
+
+ const dept=user?.department??null;
+ const sem=user?.semester??null;
+ const year=user?.year??null;
+ const hasCohort=linked&&dept!==null&&sem!==null;
+ // Depend on a stable boolean, not the identity object: the hook swaps the
+ // cached copy for the /auth/me answer, which would otherwise refetch.
+ const hasUser=Boolean(user);
+
+ useEffect(()=>{
+  if(identityLoading)return;
+  if(!hasUser){navigate("/login");return;}
+  // Nothing to scope by — do not fetch, and above all do not fall back to
+  // the whole course catalogue.
+  if(!hasCohort){setCourses([]);setLoading(false);return;}
+  let cancelled=false;
+  (async()=>{
+   try{
+    const data=await api("/api/courses");
+    if(!cancelled)setCourses(unwrap(data,["courses","data","results"]));
+   }catch(e){
+    console.error(e);
+    if(!cancelled)setError("Unable to load courses.");
+   }finally{
+    if(!cancelled)setLoading(false);
+   }
+  })();
+  return()=>{cancelled=true;};
+ },[identityLoading,hasUser,hasCohort,navigate]);
+
+ // The student's own cohort only: department + semester always, plus year
+ // when both the student record and the course carry one. There is no
+ // "show everything when the filter matches nothing" fallback any more.
+ const list=useMemo(()=>{
+  if(!hasCohort)return [];
+  return courses.filter(c=>{
+   if(!sameText(c.department,dept))return false;
+   if(!sameNumber(c.semester,sem))return false;
+   if(year!==null&&c.year!==undefined&&c.year!==null&&!sameNumber(c.year,year))return false;
+   return true;
+  });
+ },[courses,dept,sem,year,hasCohort]);
+
+ const cohort=[dept,sem!==null?`Semester ${sem}`:null,year!==null?`Year ${year}`:null].filter(Boolean).join(" · ");
+
+ if(identityLoading||loading)return <div style={styles.loading}>Loading courses...</div>;
+
  return <Page active="/student-portal/courses" navigate={navigate}>
-  <div style={styles.header}><div><h1 style={styles.title}>My Courses</h1><p style={styles.subtitle}>Courses assigned to your current semester</p></div><button style={styles.button} onClick={()=>navigate("/student-portal")}>Dashboard →</button></div>
+  <div style={styles.header}><div><h1 style={styles.title}>My Courses</h1><p style={styles.subtitle}>{cohort||"Courses assigned to your current semester"}</p></div><button style={styles.button} onClick={()=>navigate("/student-portal")}>Dashboard →</button></div>
   {error&&<div style={styles.error}>{error}</div>}
-  <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>Course List</h2><p style={styles.muted}>{list.length} course{list.length!==1?"s":""}</p></div></div>
+  {!error&&identityError&&<div style={styles.error}>{identityError}</div>}
+  {!linked
+   ? <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>Course List</h2></div></div>
+      <div style={styles.content}><div style={styles.empty}>{NOT_LINKED}</div></div>
+     </div>
+   : <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>Course List</h2><p style={styles.muted}>{list.length} course{list.length!==1?"s":""}</p></div></div>
    <div style={styles.content}><div style={styles.grid}>{list.map((c,i)=><div style={styles.item} key={getId(c._id||c.id)||i}>
     <span style={styles.label}>Course</span><div style={{fontSize:17,fontWeight:800}}>{c.name||c.title||c.courseName||"Course"}</div>
     <div style={{marginTop:8,color:"#aeb0d0"}}>{c.code||c.courseCode||"—"}</div>
     <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}><span style={styles.badge}>{c.credits??"—"} Credits</span>{c.semester&&<span style={styles.badge}>Semester {c.semester}</span>}</div>
     {c.description&&<p style={{color:"#c7cbe3",fontSize:13,lineHeight:1.6}}>{c.description}</p>}
-   </div>)}</div>{!list.length&&<div style={styles.empty}>No courses assigned.</div>}</div>
-  </div>
+   </div>)}</div>{!list.length&&<div style={styles.empty}>{hasCohort?`No courses found for ${cohort}.`:"Your record has no department or semester yet — contact your administrator."}</div>}</div>
+  </div>}
  </Page>
 }
 export default MyCourses;

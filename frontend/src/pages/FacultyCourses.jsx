@@ -15,65 +15,57 @@ import {
 
 import { Link, useNavigate } from "react-router-dom";
 
+import useIdentity from "@/hooks/useIdentity";
+
 export default function FacultyCourses() {
   const navigate = useNavigate();
 
-  const [faculty, setFaculty] = useState(null);
+  // Identity comes from the shared hook (GET /api/auth/me), which also
+  // resolves the linked Faculty doc — this page no longer re-reads
+  // `localStorage` nor looks the record up by email itself.
+  const {
+    user,
+    faculty,
+    linked,
+    loading: identityLoading,
+  } = useIdentity();
+
   const [timetables, setTimetables] = useState([]);
   const [courses, setCourses] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  const signedIn = Boolean(user);
+
+  // The one id every view on this page is scoped to.
+  const ownFacultyId = user?.facultyId ? String(user.facultyId) : null;
 
   useEffect(() => {
+    if (identityLoading) return undefined;
+
+    if (!signedIn) {
+      navigate("/login");
+      return undefined;
+    }
+
+    // Unlinked account: no Faculty record, so nothing to scope to and
+    // nothing to fetch.
+    if (!linked) {
+      setTimetables([]);
+      setCourses([]);
+      setNotifications([]);
+      setDataLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
     const loadFacultyCourses = async () => {
       try {
-        const storedUser = localStorage.getItem("user");
-
-        if (!storedUser) {
-          navigate("/login");
-          return;
-        }
-
-        const user = JSON.parse(storedUser);
-
-        console.log("Logged-in faculty user:", user);
-
-        // ---------------------------------------------
-        // Get faculty information
-        // ---------------------------------------------
-
-        let facultyData = null;
-
-        if (user.facultyId) {
-          const facultyResponse = await api.get(
-            `/faculty/${user.facultyId}`
-          );
-
-          facultyData = facultyResponse.data;
-        } else if (user.email) {
-          const facultyResponse = await api.get(
-            `/faculty`
-          );
-
-          facultyData = facultyResponse.data.find(
-            (member) =>
-              member.email?.toLowerCase() ===
-              user.email?.toLowerCase()
-          );
-        }
-
-        if (!facultyData) {
-          console.error("Faculty record not found.");
-          setLoading(false);
-          return;
-        }
-
-        setFaculty(facultyData);
-
-        // ---------------------------------------------
-        // Fetch timetable, courses and notifications
-        // ---------------------------------------------
-
+        // GET /api/timetables is already role-scoped server-side: a faculty
+        // caller receives only published timetables that contain at least
+        // one entry of their own. The per-entry filter below is the second
+        // layer, not the only one.
         const [
           timetablesResponse,
           coursesResponse,
@@ -84,45 +76,71 @@ export default function FacultyCourses() {
           api.get(`/notifications`),
         ]);
 
-        setTimetables(timetablesResponse.data || []);
-        setCourses(coursesResponse.data || []);
-        setNotifications(notificationsResponse.data || []);
+        if (cancelled) return;
 
-        setLoading(false);
+        setTimetables(
+          Array.isArray(timetablesResponse.data) ? timetablesResponse.data : []
+        );
+        setCourses(
+          Array.isArray(coursesResponse.data) ? coursesResponse.data : []
+        );
+        setNotifications(
+          Array.isArray(notificationsResponse.data)
+            ? notificationsResponse.data
+            : []
+        );
       } catch (error) {
         console.error(
           "Failed to load faculty courses:",
           error
         );
 
-        setLoading(false);
+        if (!cancelled) {
+          setTimetables([]);
+          setCourses([]);
+          setNotifications([]);
+        }
+      } finally {
+        if (!cancelled) setDataLoading(false);
       }
     };
 
     loadFacultyCourses();
-  }, [navigate]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [identityLoading, signedIn, linked, navigate]);
+
+  const loading = identityLoading || dataLoading;
 
   // ---------------------------------------------
   // Find timetable entries for this faculty
+  //
+  // Defence in depth: the server already filtered the timetables, this
+  // keeps only the entries whose facultyId is this user's own.
   // ---------------------------------------------
 
-  const facultySchedule = timetables.flatMap((timetable) =>
-    (timetable.schedule || [])
-      .filter(
-        (entry) =>
-          faculty &&
-          String(entry.facultyId) === String(faculty._id)
+  const facultySchedule = ownFacultyId
+    ? timetables.flatMap((timetable) =>
+        (timetable.schedule || [])
+          .filter(
+            (entry) => String(entry.facultyId) === ownFacultyId
+          )
+          .map((entry) => ({
+            ...entry,
+            timetableName: timetable.name,
+            semester: timetable.semester,
+            department: timetable.department,
+          }))
       )
-      .map((entry) => ({
-        ...entry,
-        timetableName: timetable.name,
-        semester: timetable.semester,
-        department: timetable.department,
-      }))
-  );
+    : [];
 
   // ---------------------------------------------
-  // Find unique courses assigned to faculty
+  // Courses assigned to this faculty member
+  //
+  // The distinct courseIds appearing in their OWN entries — never the whole
+  // catalogue. `/courses` is fetched only to resolve those ids to names.
   // ---------------------------------------------
 
   const facultyCourseIds = [
@@ -133,8 +151,19 @@ export default function FacultyCourses() {
     ),
   ];
 
-  const facultyCourses = courses.filter((course) =>
-    facultyCourseIds.includes(String(course._id))
+  const courseById = new Map(
+    courses.map((course) => [String(course._id), course])
+  );
+
+  const facultyCourses = facultyCourseIds.map(
+    (courseId) =>
+      courseById.get(courseId) || {
+        // An id that is scheduled but missing from the catalogue: shown as
+        // the bare id rather than dropped or padded with invented values.
+        _id: courseId,
+        name: null,
+        code: null,
+      }
   );
 
   // ---------------------------------------------
@@ -259,23 +288,27 @@ export default function FacultyCourses() {
   }
 
   // ---------------------------------------------
-  // Faculty not found
+  // Unlinked account
+  //
+  // `User.facultyId` is null: there is no Faculty record behind this login,
+  // so there is no "my courses" to show and nothing is invented.
   // ---------------------------------------------
 
-  if (!faculty) {
+  if (!linked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
 
-        <div className="text-center">
+        <div className="text-center max-w-md">
 
-          <User className="w-16 h-16 text-red-400 mx-auto mb-5" />
+          <User className="w-16 h-16 text-amber-400 mx-auto mb-5" />
 
           <h1 className="text-2xl font-bold text-white mb-3">
-            Faculty Profile Not Found
+            Profile not linked — contact your administrator
           </h1>
 
           <p className="text-slate-400 mb-6">
-            We couldn't find a faculty record for the logged-in account.
+            This account is not linked to a faculty record, so no courses can
+            be shown for it.
           </p>
 
           <button
@@ -455,7 +488,7 @@ export default function FacultyCourses() {
                 </p>
 
                 <p className="text-sm font-semibold text-white">
-                  {faculty.name}
+                  {faculty?.name || user?.name || "—"}
                 </p>
 
               </div>
@@ -525,7 +558,7 @@ export default function FacultyCourses() {
                     </p>
 
                     <p className="text-xl font-bold text-white">
-                      {faculty.department || "Computer Science"}
+                      {faculty?.department || user?.department || "Not specified"}
                     </p>
 
                   </div>
@@ -559,7 +592,7 @@ export default function FacultyCourses() {
                     </p>
 
                     <p className="text-xl font-bold text-white">
-                      {faculty.name}
+                      {faculty?.name || user?.name || "—"}
                     </p>
 
                   </div>
@@ -644,7 +677,7 @@ export default function FacultyCourses() {
                             </h3>
 
                             <p className="text-sm text-blue-400 mt-1">
-                              {course.code || "Course Code"}
+                              {course.code || "—"}
                             </p>
 
                           </div>
@@ -664,9 +697,7 @@ export default function FacultyCourses() {
                           </p>
 
                           <p className="text-sm text-slate-200 mt-1">
-                            {course.department ||
-                              faculty.department ||
-                              "Computer Science"}
+                            {course.department || "Not specified"}
                           </p>
 
                         </div>
@@ -702,7 +733,7 @@ export default function FacultyCourses() {
                           </p>
 
                           <p className="text-sm text-slate-200 mt-1">
-                            {course.year ?? new Date().getFullYear()}
+                            {course.academicYear ?? course.year ?? "Not specified"}
                           </p>
 
                         </div>
@@ -784,7 +815,7 @@ export default function FacultyCourses() {
                         <div>
 
                           <p className="text-white font-semibold">
-                            {course.name}
+                            {course.name || "Unnamed Course"}
                           </p>
 
                           <p className="text-xs text-slate-400 mt-1">

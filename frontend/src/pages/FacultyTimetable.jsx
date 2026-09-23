@@ -10,9 +10,11 @@ import {
   LogOut,
   Clock,
   GraduationCap,
+  ShieldAlert,
 } from "lucide-react";
 
 import api from "@/lib/api";
+import { useIdentity } from "@/hooks/useIdentity";
 
 const DAYS = [
   "Monday",
@@ -26,113 +28,137 @@ const DAYS = [
 function FacultyTimetable() {
   const navigate = useNavigate();
 
-const [user, setUser] = useState(null);
-const [timetable, setTimetable] = useState([]);
-const [courses, setCourses] = useState([]);
-const [rooms, setRooms] = useState([]);
-const [loading, setLoading] = useState(true);
-const [error, setError] = useState("");
+  // Who is signed in — resolved once by the shared hook (GET /api/auth/me),
+  // not by parsing localStorage here. `linked` is false when the account
+  // has no Faculty record behind it.
+  const {
+    user,
+    linked,
+    loading: identityLoading,
+    error: identityError,
+  } = useIdentity();
+
+  const [timetable, setTimetable] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [rooms, setRooms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const facultyId = user?.facultyId ? String(user.facultyId) : "";
+  const role = user?.role || "";
+
+  // Anyone who is not a signed-in faculty member has no business here.
+  // ProtectedRoute already guards the route; this is the second layer.
+  useEffect(() => {
+    if (identityLoading) return;
+    if (!user || (role && role !== "faculty")) {
+      navigate("/login");
+    }
+  }, [identityLoading, user, role, navigate]);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
+    if (identityLoading) return;
 
-    if (!storedUser) {
-      navigate("/login");
+    // Unlinked (or not signed in): there is nothing of this user's to show,
+    // and the render below says so instead of showing someone else's data.
+    if (!linked || !facultyId) {
+      setTimetable([]);
+      setCourses([]);
+      setRooms([]);
+      setLoading(false);
       return;
     }
 
-    try {
-      const parsedUser = JSON.parse(storedUser);
+    let canceled = false;
 
-      if (parsedUser.role !== "faculty") {
-        navigate("/login");
-        return;
-      }
+    const fetchFacultyTimetable = async () => {
+      setLoading(true);
+      setError("");
 
-      setUser(parsedUser);
-      fetchFacultyTimetable(parsedUser);
-    } catch (err) {
-      console.error("Invalid user data:", err);
-      localStorage.removeItem("user");
-      localStorage.removeItem("token");
-      navigate("/login");
-    }
-  }, [navigate]);
+      try {
+        // GET /api/timetables is scoped server-side for a faculty caller:
+        // published timetables that already contain one of this faculty's
+        // entries. The facultyId filter below is a second layer on top.
+        let timetableData, coursesData, roomsData;
 
-const fetchFacultyTimetable = async (loggedUser) => {
-  try {
-    setLoading(true);
-    setError("");
+        try {
+          const [timetableResponse, coursesResponse, roomsResponse] =
+            await Promise.all([
+              api.get("/timetables"),
+              api.get("/courses"),
+              api.get("/rooms"),
+            ]);
 
-    // Fetch timetables, courses and rooms together
-    let timetableData, coursesData, roomsData;
-    try {
-      const [timetableResponse, coursesResponse, roomsResponse] =
-        await Promise.all([
-          api.get("/timetables"),
-          api.get("/courses"),
-          api.get("/rooms"),
-        ]);
-      timetableData = timetableResponse.data;
-      coursesData = coursesResponse.data;
-      roomsData = roomsResponse.data;
-    } catch (requestError) {
-      const data = requestError.response?.data;
-      throw new Error(
-        data?.error || data?.message || requestError.message || "Failed to fetch timetable"
-      );
-    }
-
-    console.log("All timetables:", timetableData);
-    console.log("All courses:", coursesData);
-    console.log("All rooms:", roomsData);
-
-    // Handle different possible API response formats
-    const timetables = Array.isArray(timetableData)
-      ? timetableData
-      : timetableData.timetables || [];
-
-    const courseList = Array.isArray(coursesData)
-      ? coursesData
-      : coursesData.courses || [];
-
-    const roomList = Array.isArray(roomsData)
-      ? roomsData
-      : roomsData.rooms || [];
-
-    setCourses(courseList);
-    setRooms(roomList);
-
-    const facultyId = String(loggedUser.facultyId || "");
-
-    const entries = [];
-
-    timetables.forEach((table) => {
-      if (!Array.isArray(table.schedule)) return;
-
-      table.schedule.forEach((entry) => {
-        if (String(entry.facultyId || "") === facultyId) {
-          entries.push({
-            ...entry,
-            timetableName: table.name,
-            semester: table.semester,
-            year: table.year,
-            department: table.department,
-          });
+          timetableData = timetableResponse.data;
+          coursesData = coursesResponse.data;
+          roomsData = roomsResponse.data;
+        } catch (requestError) {
+          const data = requestError.response?.data;
+          throw new Error(
+            data?.error ||
+              data?.message ||
+              requestError.message ||
+              "Failed to fetch timetable"
+          );
         }
-      });
-    });
 
-    console.log("Faculty timetable entries:", entries);
+        if (canceled) return;
 
-    setTimetable(entries);
-  } catch (err) {
-    console.error("Timetable error:", err);
-    setError(err.message || "Unable to load timetable.");
-  } finally {
-    setLoading(false);
-  }
-};
+        // Handle different possible API response formats
+        const timetables = Array.isArray(timetableData)
+          ? timetableData
+          : timetableData?.timetables || [];
+
+        const courseList = Array.isArray(coursesData)
+          ? coursesData
+          : coursesData?.courses || [];
+
+        const roomList = Array.isArray(roomsData)
+          ? roomsData
+          : roomsData?.rooms || [];
+
+        setCourses(courseList);
+        setRooms(roomList);
+
+        const entries = [];
+
+        timetables.forEach((table) => {
+          if (!Array.isArray(table.schedule)) return;
+
+          // Published only, and only this faculty member's own entries.
+          // No "first timetable we can find" fallback: if none of them
+          // carry an entry of theirs, the page stays empty.
+          if (String(table.status || "") !== "published") return;
+
+          table.schedule.forEach((entry) => {
+            if (String(entry.facultyId || "") === facultyId) {
+              entries.push({
+                ...entry,
+                timetableName: table.name,
+                semester: table.semester,
+                year: table.year,
+                department: table.department,
+              });
+            }
+          });
+        });
+
+        setTimetable(entries);
+      } catch (err) {
+        if (canceled) return;
+        console.error("Timetable error:", err);
+        setError(err.message || "Unable to load timetable.");
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    };
+
+    fetchFacultyTimetable();
+
+    return () => {
+      canceled = true;
+    };
+  }, [identityLoading, linked, facultyId]);
 
   const groupedTimetable = useMemo(() => {
     const result = {};
@@ -232,7 +258,7 @@ const getRoomName = (entry) => {
     navigate(path);
   };
 
-  if (loading) {
+  if (identityLoading || loading) {
     return (
       <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
@@ -247,6 +273,36 @@ const getRoomName = (entry) => {
 
             <p className="text-slate-400 mt-2">
               Fetching your assigned classes
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --------------------------------------------------
+  // Signed in, but the account is not linked to a Faculty record.
+  // Say so — never fall back to somebody else's timetable.
+  // --------------------------------------------------
+
+  if (!linked) {
+    return (
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
+
+        <div className="flex-1 flex items-center justify-center relative z-10 p-8">
+          <div className="max-w-md text-center">
+            <ShieldAlert className="w-12 h-12 text-amber-400 mx-auto mb-5" />
+
+            <h2 className="text-xl font-semibold text-white">
+              Profile not linked — contact your administrator
+            </h2>
+
+            <p className="text-slate-400 mt-2">
+              {identityError ||
+                `Your account${
+                  user?.email ? ` (${user.email})` : ""
+                } is not linked to a faculty record, so there is no timetable to show.`}
             </p>
           </div>
         </div>
@@ -329,12 +385,6 @@ const getRoomName = (entry) => {
 >
   {item.label}
 </span>
-
-{item.id === "notifications" && (
-  <span className="ml-auto flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-xs font-bold">
-    27
-  </span>
-)}
 
                 </button>
               );

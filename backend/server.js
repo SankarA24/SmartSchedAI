@@ -16,6 +16,7 @@ import { authRouter } from "./routes/authRoute.js";
 import { usersRouter } from "./routes/usersRoute.js";
 import { studentsRouter } from "./routes/studentsRoute.js";
 import { configRouter } from "./routes/configRoute.js";
+import { queriesRouter } from "./routes/queriesRoute.js";
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/students", studentsRouter);
 app.use("/api/config", configRouter);
+app.use("/api/queries", queriesRouter);
 
 const httpServer = http.createServer(app);
 
