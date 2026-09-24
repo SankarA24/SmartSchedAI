@@ -159,101 +159,152 @@ The application also includes **AI-assisted timetable generation** and an **AI c
 
 ## 🐳 Running the stack with Docker
 
-The whole application runs from one command. You need Docker with Compose v2;
-nothing else has to be installed, not Node and not MongoDB.
+**There is nothing to configure.** You do not need an API key, you do not need
+to create or edit any `.env` file, and you do not need Node or MongoDB
+installed. Docker supplies all of it. Four commands and you are looking at the
+app.
+
+### Before you start
+
+Install **Docker Desktop** — it includes everything else this needs:
+
+- [Docker Desktop for Mac, Windows or Linux](https://www.docker.com/products/docker-desktop/)
+
+**Then open it and leave it running.** Docker Desktop is an application, not
+just a command, and none of the commands below work while it is closed. You will
+know it is ready when this prints a version instead of an error:
+
+```bash
+docker --version
+```
 
 ### Bring it up
 
+From the folder containing `docker-compose.yml`:
+
 ```bash
-docker compose build
+docker compose build     # first time only, takes a few minutes
 docker compose up -d
 ```
 
 That starts three services:
 
-| Service    | What it is                          | Address                 |
-| ---------- | ----------------------------------- | ----------------------- |
-| `frontend` | The built app, served by nginx      | <http://localhost:8082> |
-| `backend`  | Express API and Socket.io           | <http://localhost:8081> |
-| `mongo`    | MongoDB 7, on a named volume        | internal only           |
+| Service    | What it is                     | Address                 |
+| ---------- | ------------------------------ | ----------------------- |
+| `frontend` | The app, served by nginx       | <http://localhost:8082> |
+| `backend`  | The API and live updates       | <http://localhost:8081> |
+| `mongo`    | The database, on a named volume| internal only           |
 
-MongoDB is deliberately **not** published to the host, so it cannot collide with
-another MongoDB you may already be running on port 27017. Its data lives in the
+MongoDB is deliberately **not** published to your machine, so it cannot collide
+with another MongoDB you may already be running. Its data lives in the
 `mongo-data` volume and survives `docker compose down`.
 
-### Seed the database
+### Seed the database — do not skip this
 
-A fresh database is empty, so nothing will render until you seed it. Run these
-in order:
+A fresh database is completely empty: no accounts, no courses, no rooms. Run
+these three, in this order:
 
 ```bash
-docker compose exec backend node createTestUsers.js        # the three logins
-docker compose exec backend node seedRealisticData.js      # courses, faculty, rooms
-docker compose exec backend node scripts/seedSystemConfig.js   # the scheduling grid
+docker compose exec backend node createTestUsers.js             # the three logins
+docker compose exec backend node seedRealisticData.js           # courses, faculty, rooms
+docker compose exec backend node scripts/seedSystemConfig.js    # the timetable grid
 ```
 
-Then open <http://localhost:8082> and sign in. All three accounts use the
-password `123456`, and the sign-in form requires you to pick the matching role:
+> **If you skip this, the app will look broken rather than empty.** It loads
+> normally, but signing in fails with *"Invalid email or password"* — because
+> the account genuinely does not exist yet, not because you mistyped anything.
+> If you see that message, run the three commands above and try again.
 
-| Email                        | Role    |
-| ---------------------------- | ------- |
-| `admin@smartscheduler.com`   | admin   |
-| `faculty@smartscheduler.com` | faculty |
-| `student@smartscheduler.com` | student |
+### Sign in
 
-### Optional: fill it with demo data
+Open <http://localhost:8082>. All three accounts use the password `123456`:
 
-The seeds above give you the ingredients but no schedules, so the timetable
-views start empty. To generate and publish timetables for both cohorts and add
-students, notifications and queries:
+| Email                        | Role to select |
+| ---------------------------- | -------------- |
+| `admin@smartscheduler.com`   | Admin          |
+| `faculty@smartscheduler.com` | Faculty        |
+| `student@smartscheduler.com` | Student        |
+
+> **You must pick the matching role on the sign-in form.** The email and
+> password alone are not enough: choosing the wrong role is refused even when
+> the credentials are correct. Start with **Admin** — it is the only role that
+> can create and generate timetables.
+
+### Optional: fill it with example data
+
+The seeds above give you courses, staff and rooms but no actual schedules, so
+the timetable screens start empty. To generate and publish timetables for both
+cohorts and add students, notifications and queries:
 
 ```bash
 docker compose exec backend node scripts/seedDemoData.js
 ```
 
-This talks to the running API rather than the database directly, so everything
-it creates passes the same validation and access rules as a real user's actions.
-Re-running it skips records that already exist; pass `--reset-generated` to drop
-the timetables it previously produced and start over.
+Everything it creates goes through the normal API, so it obeys the same rules a
+real user would. Re-running it skips what already exists; add
+`--reset-generated` to clear the timetables it made and start over.
 
 ### Everyday commands
 
 ```bash
-docker compose logs -f backend     # follow the API logs
+docker compose logs -f backend     # watch the API logs
 docker compose restart backend     # restart one service
 docker compose down                # stop everything, keep the data
-docker compose down -v             # stop everything and delete the database
+docker compose down -v             # stop everything and erase the database
 ```
+
+### If something goes wrong
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| `docker: command not found` | Docker is not installed | Install Docker Desktop from the link above |
+| `Cannot connect to the Docker daemon` | Docker is installed but not running | Open the Docker Desktop application and wait for it to finish starting |
+| `port is already allocated` | Something else is using 8081 or 8082 | Stop that program, or change the port — see below |
+| *"Invalid email or password"* on a correct login | The database was never seeded | Run the three seed commands above |
+| *"This account is registered as admin. Please select the admin portal."* | The wrong role is selected on the form | Pick the role it names and sign in again |
+| The app loads but every screen is empty | Seeded, but no schedules exist yet | Run the demo data command above, or generate a timetable as Admin |
+| A blank page, or data that never arrives | The two ports were changed inconsistently | See *Changing the ports* below |
+
+To see what a service is actually doing, `docker compose logs backend` is almost
+always the fastest answer.
 
 ### Changing the ports
 
-Two of them are wired together and cannot be changed independently.
+Only if 8081 or 8082 is already taken. The two are wired together and **cannot
+be changed independently**.
 
-The API URL is compiled **into** the frontend image, because Vite inlines
-environment variables at build time. It therefore has to be the address your
-browser uses, not a name on the Docker network. If you move the API off 8081,
-update the `VITE_API_URL` build argument in `docker-compose.yml` and rebuild the
-frontend image — a restart alone will not pick it up.
+The API address is compiled **into** the frontend when the image is built, so it
+has to be the address your browser uses, not a name on Docker's internal
+network. If you move the API off 8081, change the `VITE_API_URL` build argument
+in `docker-compose.yml` and then rebuild:
 
-The backend allows exactly one browser origin. If you move the app off 8082,
-update `CLIENT_ORIGIN` to match, or both CORS and the Socket.io handshake will
-fail and the app will load but never receive data.
+```bash
+docker compose build frontend && docker compose up -d
+```
+
+A restart alone will not pick it up.
+
+The backend accepts exactly one browser address. If you move the app off 8082,
+change `CLIENT_ORIGIN` to match. Get this wrong and the page loads but never
+receives any data, which looks like a broken app rather than a settings
+mistake.
 
 ### Notes
 
-- On macOS, port **5000 is unusable**: the AirPlay Receiver holds it and answers
-  requests with a 403. That is why this setup uses 8081 and 8082.
-- `GOOGLE_API_KEY` is optional. Without it the AI-assisted path is unavailable
-  and generation uses the genetic scheduler with a deterministic fallback, which
-  is the default in any case. The chatbot needs a key to answer.
+- On macOS, port **5000 is unusable**: the AirPlay Receiver holds it and replies
+  to everything with a 403. That is why this setup uses 8081 and 8082.
+- `GOOGLE_API_KEY` is **optional** and empty by default. Without it, timetable
+  generation uses the built-in genetic algorithm, which is the normal path and
+  needs no external service. A key only adds the AI-assisted generation option
+  and the chatbot.
 - The `JWT_SECRET` in `docker-compose.yml` is a development placeholder. Set a
-  real one in the environment before running this anywhere that matters.
+  real one before running this anywhere that matters.
 
 ### Running without Docker
 
-If you would rather run it directly, you need Node 22 and a MongoDB instance.
-Copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to
-`frontend/.env`, adjust the values, then `npm install` and `npm run dev` in each
-directory. [`DELIVERABLE.md`](DELIVERABLE.md) has the longer version, along with
-the test commands (`npm run verify`, `npm run smoke`) and the project's known
-limitations.
+Only if you would rather not use Docker. This route **does** need setup: Node 22
+and a MongoDB instance. Copy `backend/.env.example` to `backend/.env` and
+`frontend/.env.example` to `frontend/.env`, adjust the values, then `npm install`
+and `npm run dev` in each directory. [`DELIVERABLE.md`](DELIVERABLE.md) has the
+longer version, along with the test commands (`npm run verify`, `npm run smoke`)
+and the project's known limitations.
