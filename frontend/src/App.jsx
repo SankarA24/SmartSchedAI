@@ -6,7 +6,6 @@ import FacultyPage from "./pages/Faculty";
 import StudentsPage from "./pages/Students";
 import UsersPage from "./pages/Users";
 import RoomPage from "./pages/Rooms";
-import TimetablePage from "./pages/Timetable";
 import NotificationsPage from "./pages/Notifications";
 
 import GenerateTimetable from "./pages/GenerateTimetable";
@@ -226,17 +225,6 @@ function App() {
         <Route
           path="/timetables"
           element={<Navigate to="/view-timetable" replace />}
-        />
-
-        {/* Legacy shell, reachable for one phase so the migration is
-            revertible. Deleted in U10. */}
-        <Route
-          path="/timetables-legacy"
-          element={
-            <ProtectedRoute role="admin">
-              <TimetablePage />
-            </ProtectedRoute>
-          }
         />
 
         <Route

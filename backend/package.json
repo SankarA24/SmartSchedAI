@@ -6,7 +6,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "seed:config": "node scripts/seedSystemConfig.js",
-    "verify": "node scripts/verifyConstraints.js"
+    "verify": "node scripts/verifyConstraints.js",
+    "smoke": "node scripts/smokeApi.js"
   },
   "keywords": [],
   "author": "",

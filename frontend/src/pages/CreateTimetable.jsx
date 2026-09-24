@@ -178,7 +178,7 @@ export default function CreateTimetable() {
 
   // ---------------------------------------------------
   // Step 1 options — derived from distinct Course values
-  // (same source pages/Timetable.jsx uses), never hard-coded.
+  // already stored on existing courses, never hard-coded.
   // ---------------------------------------------------
 
   const departmentOptions = useMemo(

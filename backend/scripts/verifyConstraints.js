@@ -7,6 +7,14 @@
 //   node scripts/verifyConstraints.js --latest
 //       [--department "Computer Science"] [--academicYear 2026]
 //
+// The grid the rules are judged against is NOT the compiled-in
+// DAYS / TIME_SLOTS: loadSchedulingContext reads the active
+// SystemConfig document and resolves it with getScheduleGrid,
+// falling back to DEFAULT_GRID when no config has been seeded.
+// That grid is passed to validateSchedule as its trailing
+// argument and summarised in the "Grid:" header line, so a
+// reader can tell what the PASS / FAIL rows mean.
+//
 // Exits 1 if any rule FAILs (or the timetable / schedule cannot
 // be loaded), 0 if every rule PASSes.
 
@@ -18,6 +26,7 @@ import dbConnect from "../utils/dbConnect.js";
 import Timetable from "../models/Timetable.js";
 import { loadSchedulingContext } from "../utils/schedulingContext.js";
 import { validateSchedule } from "../utils/scheduleValidator.js";
+import { slotLabel } from "../utils/schedulingConstants.js";
 
 
 function parseArgs(argv) {
@@ -76,6 +85,44 @@ const RULES = [
     { label: "Session duration", pattern: /^Invalid time slot/ },
     { label: "Session count", pattern: /requires \d+ sessions but received/ },
 ];
+
+
+// =========================================================
+// DESCRIBE GRID
+// Summarise the grid the rules are judged against, so a FAIL
+// on "Working days" or "Session duration" can be read against
+// the day and slot list that actually applied.
+//
+// `config` is the active SystemConfig document, or null when
+// the database has none — in which case the grid is
+// DEFAULT_GRID, exactly the compiled-in values.
+// =========================================================
+
+function describeGrid(grid, config) {
+
+    const days = Array.isArray(grid && grid.days) ? grid.days : [];
+    const slots = Array.isArray(grid && grid.slots) ? grid.slots : [];
+    const breaks = Array.isArray(grid && grid.breaks) ? grid.breaks : [];
+
+    const summary = {
+        source: config ? "SystemConfig" : "DEFAULT_GRID (no SystemConfig)",
+        days: days.length,
+        slots: slots.length,
+        breaks: breaks.length,
+        weeks: grid && grid.weeks,
+    };
+
+    if (days.length > 0) {
+        summary.dayNames = days.join(", ");
+    }
+
+    if (slots.length > 0) {
+        summary.firstSlot = slotLabel(slots[0]);
+        summary.lastSlot = slotLabel(slots[slots.length - 1]);
+    }
+
+    return summary;
+}
 
 
 function groupErrorsByRule(errors) {
@@ -231,6 +278,12 @@ async function main() {
             });
 
             console.log("Context:", JSON.stringify(context.counts));
+
+            // The grid every rule below is judged against.
+            console.log(
+                "Grid:",
+                JSON.stringify(describeGrid(context.grid, context.config))
+            );
 
             const result = validateSchedule(
                 timetable.schedule,
