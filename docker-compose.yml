@@ -1,0 +1,56 @@
+# SmartSchedAI — full stack.
+#
+# Ports on the host:
+#   8082  the application (open this one)
+#   8081  the API
+# MongoDB is deliberately NOT published: it is reachable only inside this
+# network, so it cannot collide with a MongoDB already running on 27017.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: smartsched-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: smartsched-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/smartschedai
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-in-any-real-deployment}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      # Must match the origin the browser loads the app from, or CORS
+      # and the Socket.io handshake both fail.
+      CLIENT_ORIGIN: http://localhost:8082
+    ports:
+      - "8081:5000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked in at build time — this is the URL the BROWSER uses.
+        VITE_API_URL: http://localhost:8081/api
+    container_name: smartsched-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8082:80"
+
+volumes:
+  mongo-data:
