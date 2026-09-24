@@ -6,8 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { CourseForm } from "@/components/CourseForm"
 import { DataTable } from "@/components/Data-table"
-import { Plus, BookOpen, Users, Calendar, LayoutDashboard, Home, Bell, UserCog, GraduationCap } from "lucide-react"
+import { Plus, BookOpen } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/AppShell"
+import { navForRole } from "@/lib/nav"
 import { StatusBadge } from "@/components/StatusBadge"
 
 export default function CoursesPage() {
@@ -17,28 +18,7 @@ export default function CoursesPage() {
   const [formLoading, setFormLoading] = useState(false)
   const [editingCourse, setEditingCourse] = useState(null)
 
-  const brand = { title: "SmartSchedAI", subtitle: "Admin" }
-
-  const navigationItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
-    { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
-    { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
-    { id: "users", label: "Users", icon: UserCog, path: "/users" },
-    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
-    {
-      id: "timetables",
-      label: "Timetables",
-      icon: Calendar,
-      path: "/timetables",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/notifications",
-    },
-  ]
+  const { brand, nav, quickActions } = navForRole("admin")
 
   // Fetch courses from backend
   const fetchCourses = async () => {
@@ -198,7 +178,7 @@ export default function CoursesPage() {
 
   if (loading) {
     return (
-      <AppShell brand={brand} nav={navigationItems}>
+      <AppShell brand={brand} nav={nav} quickActions={quickActions}>
         <div className="space-y-6">
           <div className="h-9 w-72 animate-pulse rounded-md bg-muted" />
           <div className="h-5 w-96 animate-pulse rounded-md bg-muted" />
@@ -209,7 +189,7 @@ export default function CoursesPage() {
   }
 
   return (
-    <AppShell brand={brand} nav={navigationItems}>
+    <AppShell brand={brand} nav={nav} quickActions={quickActions}>
       <PageHeader
         title="Courses"
         description="Manage academic courses and their details."

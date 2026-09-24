@@ -1,23 +1,35 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  CalendarDays,
-  BookOpen,
   Bell,
-  User,
-  LogOut,
-  Clock3,
+  BookOpen,
   Building2,
+  CalendarDays,
+  ChevronRight,
+  Clock3,
   GraduationCap,
   Mail,
-  ChevronRight,
-  DoorOpen,
+  User,
+  UserX,
 } from "lucide-react";
+
 import api from "@/lib/api";
+import { navForRole } from "@/lib/nav";
+import { weekStrip } from "@/lib/schedule";
 import useIdentity from "@/hooks/useIdentity";
+import { useSystemConfig } from "@/hooks/useSystemConfig";
 import { useTimetableData } from "@/hooks/useTimetableData";
-import { StatCard as AnalyticsStat } from "@/components/common/StatCard";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
+import { SectionCard } from "@/components/common/SectionCard";
+import { StatCard } from "@/components/common/StatCard";
+import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { WeekStrip } from "@/components/timetable/WeekStrip";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /* ============================================================
    COHORT SCOPING
@@ -233,7 +245,7 @@ function uniqueEntries(schedule) {
 }
 
 /* ============================================================
-   STUDENT PORTAL
+   STUDENT DASHBOARD
 ============================================================ */
 
 function StudentPortal() {
@@ -254,11 +266,15 @@ function StudentPortal() {
     timetables,
     courses,
     rooms,
+    maps,
     loading: dataLoading,
     error: dataError,
   } = useTimetableData(filters);
 
+  const { grid } = useSystemConfig();
+
   const [notifications, setNotifications] = useState([]);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   // ------------------------------------------------------------
   // NO SESSION → LOGIN
@@ -555,6 +571,15 @@ function StudentPortal() {
   }, [schedule, courses]);
 
   // ------------------------------------------------------------
+  // WEEK STRIP — this student's own entries only
+  // ------------------------------------------------------------
+
+  const weekDays = useMemo(
+    () => weekStrip(schedule, { weekOffset, grid }),
+    [schedule, weekOffset, grid]
+  );
+
+  // ------------------------------------------------------------
   // WEEKLY STATISTICS
   // ------------------------------------------------------------
 
@@ -643,1048 +668,342 @@ function StudentPortal() {
         : "";
 
   // ------------------------------------------------------------
-  // NAVIGATION / LOGOUT
+  // SHELL
   // ------------------------------------------------------------
 
-  const goTo = (path) => navigate(path);
+  const { brand, nav } = navForRole(user?.role || "student");
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    navigate("/login");
-  };
-
-  // ------------------------------------------------------------
-  // LOADING
-  // ------------------------------------------------------------
-
-  if (loading) {
-    return (
-      <div style={styles.loadingPage}>
-        <div style={styles.loadingBox}>
-          <div style={styles.loadingIcon}>
-            <GraduationCap size={30} />
-          </div>
-          <h2 style={styles.loadingTitle}>SmartSchedAI</h2>
-          <p style={styles.loadingText}>
-            Loading Student Portal...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ------------------------------------------------------------
-  // UI
-  // ------------------------------------------------------------
+  const shellNav = useMemo(
+    () =>
+      nav.map((item) =>
+        item.badgeKey === "unread" ? { ...item, badge: unreadNotifications } : item
+      ),
+    [nav, unreadNotifications]
+  );
 
   return (
-    <div style={styles.app}>
-{/* SIDEBAR */}
-<aside style={styles.sidebar}>
-  <div style={styles.brand}>
-    <div style={styles.logo}>🎓</div>
-
-    <div>
-      <div style={styles.brandName}>Smart Scheduler</div>
-      <div style={styles.brandSubtitle}>Student Portal</div>
-    </div>
-  </div>
-
-  <nav style={styles.navigation}>
-    <button
-      style={{
-        ...styles.navItem,
-        ...styles.navItemActive,
+    <AppShell
+      brand={brand}
+      nav={shellNav}
+      header={{
+        notifications: unreadNotifications,
+        onNotificationsClick: () => navigate("/student-portal/notifications"),
       }}
-      onClick={() => goTo("/student-portal")}
+      chatbot={{ context: { page: "student-portal", classes: weeklyClasses } }}
     >
-      <span style={styles.navIcon}>▦</span>
-      <span>Dashboard</span>
-    </button>
+      <PageHeader
+        title="Student Dashboard"
+        description={`Welcome back, ${studentName}.`}
+        actions={
+          <Button variant="outline" onClick={() => navigate("/student-portal/timetable")}>
+            <CalendarDays className="size-4" />
+            My Timetable
+          </Button>
+        }
+      />
 
-    <button
-      style={styles.navItem}
-      onClick={() => goTo("/student-portal/timetable")}
-    >
-      <span style={styles.navIcon}>▣</span>
-      <span>My Timetable</span>
-    </button>
-
-    <button
-      style={styles.navItem}
-      onClick={() => goTo("/student-portal/courses")}
-    >
-      <span style={styles.navIcon}>▤</span>
-      <span>My Courses</span>
-    </button>
-
-    <button
-      style={styles.navItem}
-      onClick={() => goTo("/student-portal/notifications")}
-    >
-      <span style={styles.navIcon}>♧</span>
-      <span>Notifications</span>
-
-      {unreadNotifications > 0 && (
-        <span style={styles.notificationBadge}>
-          {unreadNotifications}
-        </span>
-      )}
-    </button>
-
-    <button
-      style={styles.navItem}
-      onClick={() => goTo("/student-portal/profile")}
-    >
-      <span style={styles.navIcon}>♙</span>
-      <span>My Profile</span>
-    </button>
-  </nav>
-
-  <div style={styles.sidebarBottom}>
-    <button
-      style={styles.navItem}
-      onClick={handleLogout}
-    >
-      <span style={styles.navIcon}>↪</span>
-      <span>Logout</span>
-    </button>
-  </div>
-</aside>
-
-      {/* MAIN */}
-      <main style={styles.main}>
-        {/* HEADER */}
-        <div style={styles.header}>
-          <div>
-            <h1 style={styles.pageTitle}>
-              Student Dashboard
-            </h1>
-
-            <p style={styles.welcome}>
-              Welcome back, {studentName} 👋
-            </p>
-          </div>
-
-          <div style={styles.userCard}>
-            <span style={styles.userRole}>Student</span>
-            <strong style={styles.userName}>
-              {studentName}
-            </strong>
-          </div>
-        </div>
-
+      <div className="space-y-6">
         {errorMessage && (
-          <div style={styles.errorBox}>{errorMessage}</div>
+          <Callout tone="destructive" title="Could not load your timetable">
+            {errorMessage}
+          </Callout>
         )}
 
-        {!linked ? (
+        {loading ? (
+          <div className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[0, 1, 2, 3].map((index) => (
+                <Skeleton key={index} className="h-28 w-full rounded-xl" />
+              ))}
+            </div>
+            <Skeleton className="h-48 w-full rounded-lg" />
+          </div>
+        ) : !linked ? (
           /* UNLINKED PROFILE — no data is shown at all */
-          <section style={styles.card}>
-            <div style={styles.cardHeader}>
-              <div>
-                <h2 style={styles.cardTitle}>
-                  Profile not linked
-                </h2>
-
-                <p style={styles.cardSubtitle}>
-                  Your account is not connected to a student record
-                </p>
-              </div>
-            </div>
-
-            <div style={styles.emptyState}>
-              Profile not linked — contact your administrator
-            </div>
-          </section>
+          <SectionCard
+            title="Profile not linked"
+            description="Your account is not connected to a student record."
+            icon={UserX}
+          >
+            <EmptyState
+              icon={UserX}
+              title="Profile not linked — contact your administrator"
+              description="Until your account is linked to a student record there is no cohort to show courses or a timetable for."
+            />
+          </SectionCard>
         ) : (
           <>
-            {/* TIMETABLE STATUS */}
             {selectedTimetable && (
-              <div style={styles.timetableInfo}>
-                <div>
-                  <span style={styles.timetableInfoLabel}>
-                    CURRENT TIMETABLE
-                  </span>
-                  <strong style={styles.timetableInfoName}>
+              <div className="flex animate-in flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4 fade-in duration-150">
+                <div className="min-w-0">
+                  <div className="text-xs tracking-wide text-muted-foreground uppercase">
+                    Current timetable
+                  </div>
+                  <div className="truncate text-sm font-medium text-foreground">
                     {selectedTimetable.name ||
-                      `${studentDepartment} - Semester ${studentSemester}`}
-                  </strong>
+                      `${studentDepartment} — Semester ${studentSemester}`}
+                  </div>
                 </div>
 
-                <span style={styles.statusBadge}>
+                <Badge variant="secondary" className="capitalize">
                   {selectedTimetable.status}
-                </span>
+                </Badge>
               </div>
             )}
 
-            {/* STATISTICS */}
-            <section style={styles.statsGrid}>
+            {/* WEEK AT A GLANCE — this student's own entries only */}
+            <WeekStrip
+              days={weekDays}
+              weekOffset={weekOffset}
+              maps={maps}
+              onPrev={() => setWeekOffset((value) => value - 1)}
+              onNext={() => setWeekOffset((value) => value + 1)}
+              onToday={() => setWeekOffset(0)}
+            />
+
+            {/* STAT TILES */}
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard
-                icon={<BookOpen size={24} />}
-                title="My Courses"
+                label="My Courses"
                 value={myCourses.length}
-                iconStyle="blue"
+                icon={BookOpen}
+                href="/student-portal/courses"
               />
-
               <StatCard
-                icon={<CalendarDays size={24} />}
-                title="Weekly Classes"
+                label="Weekly Classes"
                 value={weeklyClasses}
-                iconStyle="green"
+                icon={CalendarDays}
+                tone="success"
+                href="/student-portal/timetable"
               />
-
+              <StatCard label="Weekly Hours" value={weeklyHours} icon={Clock3} />
               <StatCard
-                icon={<Clock3 size={24} />}
-                title="Weekly Hours"
-                value={weeklyHours}
-                iconStyle="purple"
-              />
-
-              <StatCard
-                icon={<Bell size={24} />}
-                title="Unread Notifications"
+                label="Unread Notifications"
                 value={unreadNotifications}
-                iconStyle="yellow"
+                icon={Bell}
+                tone="warning"
+                href="/student-portal/notifications"
               />
-            </section>
+            </div>
 
-            {/* WEEKLY ANALYTICS — shared StatCard, real data only */}
-            <section style={{ ...styles.card, marginBottom: "28px" }}>
-              <div style={styles.cardHeader}>
-                <div>
-                  <h2 style={styles.cardTitle}>Weekly Analytics</h2>
+            <Tabs defaultValue="overview" className="gap-4">
+              <TabsList variant="underline">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="schedule">My Schedule</TabsTrigger>
+                <TabsTrigger value="courses">My Courses</TabsTrigger>
+                <TabsTrigger value="notifications">Notifications</TabsTrigger>
+              </TabsList>
 
-                  <p style={styles.cardSubtitle}>
-                    Derived from your own published timetable
-                  </p>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  padding: "24px",
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                  gap: "20px",
-                }}
-              >
-                <AnalyticsStat
-                  label="Classes per week"
-                  value={weeklyClasses}
+              {/* OVERVIEW */}
+              <TabsContent value="overview" className="space-y-6">
+                {/* WEEKLY ANALYTICS — shared StatCard, real data only */}
+                <SectionCard
+                  title="Weekly Analytics"
+                  description="Derived from your own published timetable."
                   icon={CalendarDays}
-                />
-
-                <AnalyticsStat
-                  label="Hours per week"
-                  value={weeklyHours}
-                  icon={Clock3}
-                />
-
-                <AnalyticsStat
-                  label="Courses"
-                  value={myCourses.length}
-                  icon={BookOpen}
-                />
-              </div>
-            </section>
-
-            {/* CONTENT GRID */}
-            <section style={styles.contentGrid}>
-              {/* STUDENT INFORMATION */}
-              <div style={styles.card}>
-                <div style={styles.cardHeader}>
-                  <div>
-                    <h2 style={styles.cardTitle}>
-                      Student Information
-                    </h2>
-
-                    <p style={styles.cardSubtitle}>
-                      Your academic details
-                    </p>
-                  </div>
-                </div>
-
-                <div style={styles.infoGrid}>
-                  <InfoItem
-                    icon={<User size={20} />}
-                    label="Name"
-                    value={studentName}
-                  />
-
-                  <InfoItem
-                    icon={<Mail size={20} />}
-                    label="Email"
-                    value={studentEmail}
-                  />
-
-                  <InfoItem
-                    icon={<Building2 size={20} />}
-                    label="Department"
-                    value={studentDepartment}
-                  />
-
-                  <InfoItem
-                    icon={<GraduationCap size={20} />}
-                    label="Semester"
-                    value={studentSemester}
-                  />
-                </div>
-              </div>
-
-              {/* MY COURSES */}
-              <div style={styles.card}>
-                <div style={styles.cardHeader}>
-                  <div>
-                    <h2 style={styles.cardTitle}>
-                      My Courses
-                    </h2>
-
-                    <p style={styles.cardSubtitle}>
-                      Courses for the current semester
-                    </p>
-                  </div>
-
-                  <button
-                    style={styles.viewButton}
-                    onClick={() =>
-                      goTo("/student-portal/courses")
-                    }
-                  >
-                    View All
-                    <ChevronRight size={18} />
-                  </button>
-                </div>
-
-                <div style={styles.courseList}>
-                  {myCourses.length === 0 ? (
-                    <EmptyState
-                      text={emptyReason || "No courses assigned."}
+                >
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <StatCard
+                      label="Classes per week"
+                      value={weeklyClasses}
+                      icon={CalendarDays}
                     />
-                  ) : (
-                    myCourses.slice(0, 5).map((course, index) => (
-                      <div
-                        key={
-                          getId(course._id || course.id) ||
-                          index
-                        }
-                        style={styles.courseItem}
-                      >
-                        <div style={styles.courseIcon}>
-                          <BookOpen size={20} />
-                        </div>
+                    <StatCard label="Hours per week" value={weeklyHours} icon={Clock3} />
+                    <StatCard label="Courses" value={myCourses.length} icon={BookOpen} />
+                  </div>
+                </SectionCard>
 
-                        <div style={styles.courseText}>
-                          <strong style={styles.courseName}>
-                            {course.name ||
-                              course.title ||
-                              course.courseName ||
-                              "Course"}
-                          </strong>
-
-                          <span style={styles.courseCode}>
-                            {course.code ||
-                              course.courseCode ||
-                              "—"}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* MY SCHEDULE */}
-            <section style={styles.scheduleCard}>
-              <div style={styles.cardHeader}>
-                <div>
-                  <h2 style={styles.cardTitle}>
-                    My Schedule
-                  </h2>
-
-                  <p style={styles.cardSubtitle}>
-                    Your assigned classes
-                  </p>
-                </div>
-
-                <button
-                  style={styles.viewButton}
-                  onClick={() =>
-                    goTo("/student-portal/timetable")
+                <SectionCard
+                  title="Student Information"
+                  description="Your academic details."
+                  icon={User}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate("/student-portal/profile")}
+                    >
+                      Profile
+                      <ChevronRight className="size-4" />
+                    </Button>
                   }
                 >
-                  View Timetable
-                  <ChevronRight size={18} />
-                </button>
-              </div>
+                  <dl className="grid gap-4 sm:grid-cols-2">
+                    <InfoItem icon={User} label="Name" value={studentName} />
+                    <InfoItem icon={Mail} label="Email" value={studentEmail} />
+                    <InfoItem
+                      icon={Building2}
+                      label="Department"
+                      value={studentDepartment}
+                    />
+                    <InfoItem
+                      icon={GraduationCap}
+                      label="Semester"
+                      value={studentSemester}
+                    />
+                  </dl>
+                </SectionCard>
+              </TabsContent>
 
-              <div style={styles.scheduleList}>
-                {sortedSchedule.length === 0 ? (
-                  <EmptyState
-                    text={
-                      emptyReason || "No timetable entries found."
-                    }
-                  />
-                ) : (
-                  sortedSchedule.map((entry, index) => (
-                    <div
-                      key={entry._displayId || index}
-                      style={styles.scheduleRow}
+              {/* MY SCHEDULE */}
+              <TabsContent value="schedule">
+                <SectionCard
+                  title="My Schedule"
+                  description="Your assigned classes."
+                  icon={CalendarDays}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate("/student-portal/timetable")}
                     >
-                      {/* DAY */}
-                      <div style={styles.scheduleDay}>
-                        <strong>{entry._day || "—"}</strong>
-                      </div>
+                      View timetable
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  }
+                >
+                  {sortedSchedule.length === 0 ? (
+                    <EmptyState
+                      icon={CalendarDays}
+                      title="Nothing scheduled yet"
+                      description={emptyReason || "No timetable entries found."}
+                    />
+                  ) : (
+                    <TimetableListView
+                      schedule={schedule}
+                      grid={grid}
+                      maps={maps}
+                      groupBy="day"
+                      colorMode="type"
+                    />
+                  )}
+                </SectionCard>
+              </TabsContent>
 
-                      {/* TIME */}
-                      <div style={styles.scheduleTime}>
-                        <Clock3
-                          size={19}
-                          style={styles.timeIcon}
-                        />
+              {/* MY COURSES */}
+              <TabsContent value="courses">
+                <SectionCard
+                  title="My Courses"
+                  description="Courses referenced by your own timetable."
+                  icon={BookOpen}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate("/student-portal/courses")}
+                    >
+                      View all
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  }
+                >
+                  {myCourses.length === 0 ? (
+                    <EmptyState
+                      icon={BookOpen}
+                      title="No courses assigned"
+                      description={emptyReason || "No courses assigned."}
+                    />
+                  ) : (
+                    <ul className="grid gap-3 sm:grid-cols-2">
+                      {myCourses.map((course, index) => (
+                        <li
+                          key={getId(course._id || course.id) || index}
+                          className="flex animate-in items-start gap-3 rounded-lg border border-border bg-card p-4 fade-in duration-150"
+                        >
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <BookOpen className="size-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-foreground">
+                              {course.name ||
+                                course.title ||
+                                course.courseName ||
+                                "Course"}
+                            </div>
+                            <div className="font-mono text-xs text-muted-foreground">
+                              {course.code || course.courseCode || "—"}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </SectionCard>
+              </TabsContent>
 
-                        <strong>
-                          {entry._startTime || "—"} -{" "}
-                          {entry._endTime || "—"}
-                        </strong>
-                      </div>
-
-                      {/* COURSE */}
-                      <div style={styles.scheduleCourse}>
-                        <span style={styles.smallLabel}>
-                          COURSE
-                        </span>
-
-                        <strong>{entry._courseName}</strong>
-                      </div>
-
-                      {/* ROOM */}
-                      <div style={styles.scheduleRoom}>
-                        <span style={styles.smallLabel}>
-                          ROOM
-                        </span>
-
-                        <div style={styles.roomValue}>
-                          <DoorOpen size={18} />
-                          <strong>
-                            {entry._roomName}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
+              {/* NOTIFICATIONS */}
+              <TabsContent value="notifications">
+                <SectionCard
+                  title="Notifications"
+                  description="Announcements addressed to students."
+                  icon={Bell}
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate("/student-portal/notifications")}
+                    >
+                      View all
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  }
+                >
+                  {notifications.length === 0 ? (
+                    <EmptyState
+                      icon={Bell}
+                      title="No notifications"
+                      description="Nothing has been sent to you yet."
+                    />
+                  ) : (
+                    <ul className="divide-y divide-border">
+                      {notifications.slice(0, 8).map((notification, index) => (
+                        <li
+                          key={getId(notification._id || notification.id) || index}
+                          className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                        >
+                          <Bell className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-foreground">
+                              {notification.title || notification.type || "Notification"}
+                            </div>
+                            {notification.message && (
+                              <p className="text-sm text-muted-foreground">
+                                {notification.message}
+                              </p>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </SectionCard>
+              </TabsContent>
+            </Tabs>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
-// ============================================================
-// STAT CARD
-// ============================================================
-
-function StatCard({ icon, title, value, iconStyle }) {
-  const iconColors = {
-    blue: {
-      background: "rgba(37, 99, 235, 0.25)",
-      color: "#60a5fa",
-    },
-    green: {
-      background: "rgba(16, 185, 129, 0.22)",
-      color: "#34d399",
-    },
-    purple: {
-      background: "rgba(139, 92, 246, 0.22)",
-      color: "#c084fc",
-    },
-    yellow: {
-      background: "rgba(245, 158, 11, 0.22)",
-      color: "#facc15",
-    },
-  };
-
-  return (
-    <div style={styles.statCard}>
-      <div
-        style={{
-          ...styles.statIcon,
-          ...(iconColors[iconStyle] || iconColors.blue),
-        }}
-      >
-        {icon}
-      </div>
-
-      <div style={styles.statContent}>
-        <span style={styles.statTitle}>{title}</span>
-        <strong style={styles.statValue}>{value}</strong>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// INFO ITEM
-// ============================================================
+/* ============================================================
+   INFO ITEM
+============================================================ */
 
 function InfoItem({ icon, label, value }) {
-  return (
-    <div style={styles.infoItem}>
-      <div style={styles.infoIcon}>{icon}</div>
+  const Icon = icon;
 
-      <div style={{ minWidth: 0 }}>
-        <span style={styles.infoLabel}>{label}</span>
-        <strong style={styles.infoValue}>{value}</strong>
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-4">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Icon className="size-4" />
+      </div>
+      <div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className="truncate text-sm font-medium text-foreground">{value}</dd>
       </div>
     </div>
   );
 }
-
-// ============================================================
-// EMPTY STATE
-// ============================================================
-
-function EmptyState({ text }) {
-  return <div style={styles.emptyState}>{text}</div>;
-}
-
-// ============================================================
-// INLINE STYLES
-// ============================================================
-
-const styles = {
-  app: {
-    minHeight: "100vh",
-    display: "flex",
-    background:
-      "linear-gradient(135deg, #151943 0%, #24165c 45%, #5a168d 100%)",
-    color: "#ffffff",
-    fontFamily:
-      "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  },
-
-  sidebar: {
-    width: "255px",
-    minWidth: "255px",
-    minHeight: "100vh",
-    background: "rgba(12, 17, 54, 0.92)",
-    borderRight: "1px solid rgba(255,255,255,0.08)",
-    display: "flex",
-    flexDirection: "column",
-    padding: "24px",
-    boxSizing: "border-box",
-    position: "sticky",
-    top: 0,
-    height: "100vh",
-  },
-
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    marginBottom: "48px",
-  },
-
-  logo: {
-    width: "44px",
-    height: "44px",
-    borderRadius: "12px",
-    background:
-      "linear-gradient(135deg, #0ea5e9, #2563eb)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "0 8px 25px rgba(14,165,233,0.3)",
-  },
-
-  brandName: {
-    fontSize: "18px",
-    fontWeight: 800,
-    color: "#ffffff",
-  },
-
-  brandSubtitle: {
-    fontSize: "12px",
-    color: "#9ca3c7",
-    marginTop: "3px",
-  },
-
-  navigation: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-  },
-
-  navItem: {
-    width: "100%",
-    minHeight: "48px",
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    padding: "0 16px",
-    border: "none",
-    borderRadius: "12px",
-    background: "transparent",
-    color: "#c7cbe3",
-    fontSize: "15px",
-    fontWeight: 600,
-    cursor: "pointer",
-    textAlign: "left",
-  },
-navIcon: {
-  fontSize: "19px",
-  width: "20px",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flexShrink: 0,
-},
-  navItemActive: {
-    background:
-      "linear-gradient(90deg, rgba(37,99,235,0.45), rgba(37,99,235,0.25))",
-    color: "#ffffff",
-    boxShadow:
-      "inset 0 0 0 1px rgba(96,165,250,0.35)",
-  },
-
-  notificationBadge: {
-    marginLeft: "auto",
-    minWidth: "22px",
-    height: "22px",
-    padding: "0 6px",
-    borderRadius: "999px",
-    background: "#ff365f",
-    color: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "11px",
-    fontWeight: 800,
-  },
-
-  sidebarBottom: {
-    marginTop: "auto",
-  },
-
-  main: {
-    flex: 1,
-    padding: "38px 32px 60px",
-    minWidth: 0,
-    boxSizing: "border-box",
-    overflow: "hidden",
-  },
-
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "20px",
-    marginBottom: "28px",
-  },
-
-  pageTitle: {
-    margin: 0,
-    fontSize: "46px",
-    lineHeight: 1.1,
-    fontWeight: 800,
-    letterSpacing: "-1.5px",
-  },
-
-  welcome: {
-    margin: "12px 0 0",
-    fontSize: "18px",
-    color: "#c7cbe3",
-  },
-
-  userCard: {
-    padding: "14px 20px",
-    minWidth: "120px",
-    borderRadius: "14px",
-    background: "rgba(117, 55, 180, 0.35)",
-    border: "1px solid rgba(168, 85, 247, 0.35)",
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-  },
-
-  userRole: {
-    color: "#b6a7d8",
-    fontSize: "12px",
-  },
-
-  userName: {
-    fontSize: "14px",
-    color: "#ffffff",
-  },
-
-  errorBox: {
-    padding: "14px 18px",
-    marginBottom: "20px",
-    borderRadius: "12px",
-    background: "rgba(239,68,68,0.15)",
-    border: "1px solid rgba(239,68,68,0.4)",
-    color: "#fecaca",
-  },
-
-  timetableInfo: {
-    marginBottom: "24px",
-    padding: "14px 18px",
-    borderRadius: "14px",
-    background: "rgba(91,61,155,0.4)",
-    border: "1px solid rgba(139,92,246,0.3)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "15px",
-  },
-
-  timetableInfoLabel: {
-    display: "block",
-    fontSize: "10px",
-    color: "#9189b6",
-    fontWeight: 700,
-    marginBottom: "5px",
-  },
-
-  timetableInfoName: {
-    display: "block",
-    fontSize: "14px",
-    color: "#ffffff",
-  },
-
-  statusBadge: {
-    padding: "6px 10px",
-    borderRadius: "999px",
-    background: "rgba(52,211,153,0.15)",
-    border: "1px solid rgba(52,211,153,0.3)",
-    color: "#6ee7b7",
-    fontSize: "11px",
-    fontWeight: 700,
-    textTransform: "uppercase",
-  },
-
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(4, minmax(0, 1fr))",
-    gap: "20px",
-    marginBottom: "28px",
-  },
-
-  statCard: {
-    minHeight: "126px",
-    borderRadius: "17px",
-    padding: "24px",
-    boxSizing: "border-box",
-    background:
-      "linear-gradient(145deg, rgba(63,39,126,0.8), rgba(53,31,111,0.8))",
-    border: "1px solid rgba(139,92,246,0.35)",
-    display: "flex",
-    alignItems: "center",
-    gap: "18px",
-  },
-
-  statIcon: {
-    width: "50px",
-    height: "50px",
-    flexShrink: 0,
-    borderRadius: "13px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  statContent: {
-    marginLeft: "auto",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-  },
-
-  statTitle: {
-    color: "#b5acd5",
-    fontSize: "14px",
-    marginBottom: "4px",
-  },
-
-  statValue: {
-    fontSize: "30px",
-    color: "#ffffff",
-  },
-
-  contentGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "minmax(0, 1.65fr) minmax(340px, 0.9fr)",
-    gap: "24px",
-    marginBottom: "28px",
-  },
-
-  card: {
-    borderRadius: "18px",
-    background:
-      "linear-gradient(145deg, rgba(62,37,123,0.82), rgba(64,30,116,0.82))",
-    border: "1px solid rgba(139,92,246,0.3)",
-    overflow: "hidden",
-  },
-
-  cardHeader: {
-    minHeight: "104px",
-    padding: "26px 24px",
-    boxSizing: "border-box",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "15px",
-    borderBottom:
-      "1px solid rgba(255,255,255,0.08)",
-  },
-
-  cardTitle: {
-    margin: 0,
-    fontSize: "21px",
-    fontWeight: 750,
-  },
-
-  cardSubtitle: {
-    margin: "7px 0 0",
-    color: "#aaa4c9",
-    fontSize: "14px",
-  },
-
-  infoGrid: {
-    padding: "24px",
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(2, minmax(0, 1fr))",
-    gap: "18px",
-  },
-
-  infoItem: {
-    minHeight: "76px",
-    padding: "15px",
-    borderRadius: "13px",
-    background: "rgba(91,61,155,0.48)",
-    border: "1px solid rgba(167,139,250,0.15)",
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    boxSizing: "border-box",
-  },
-
-  infoIcon: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "11px",
-    background: "rgba(59,130,246,0.2)",
-    color: "#60a5fa",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  infoLabel: {
-    display: "block",
-    color: "#aaa4c9",
-    fontSize: "12px",
-    marginBottom: "5px",
-  },
-
-  infoValue: {
-    display: "block",
-    color: "#ffffff",
-    fontSize: "14px",
-    wordBreak: "break-word",
-  },
-
-  viewButton: {
-    border: "1px solid rgba(139,92,246,0.45)",
-    background: "rgba(91,61,155,0.35)",
-    color: "#ddd6fe",
-    borderRadius: "10px",
-    padding: "10px 14px",
-    display: "flex",
-    alignItems: "center",
-    gap: "5px",
-    fontWeight: 600,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-
-  courseList: {
-    padding: "18px 24px 24px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "9px",
-  },
-
-  courseItem: {
-    minHeight: "66px",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    background: "rgba(91,61,155,0.45)",
-    display: "flex",
-    alignItems: "center",
-    gap: "13px",
-    boxSizing: "border-box",
-  },
-
-  courseIcon: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "10px",
-    background: "rgba(59,130,246,0.2)",
-    color: "#60a5fa",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  courseText: {
-    minWidth: 0,
-  },
-
-  courseName: {
-    display: "block",
-    fontSize: "13px",
-    color: "#ffffff",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: "260px",
-  },
-
-  courseCode: {
-    display: "block",
-    marginTop: "5px",
-    fontSize: "11px",
-    color: "#9993bd",
-  },
-
-  scheduleCard: {
-    borderRadius: "18px",
-    background:
-      "linear-gradient(145deg, rgba(62,37,123,0.82), rgba(64,30,116,0.82))",
-    border: "1px solid rgba(139,92,246,0.3)",
-    overflow: "hidden",
-  },
-
-  scheduleList: {
-    padding: "20px 24px 24px",
-    display: "flex",
-    flexDirection: "column",
-  },
-
-  scheduleRow: {
-    minHeight: "88px",
-    display: "grid",
-    gridTemplateColumns:
-      "125px 180px minmax(220px, 1fr) minmax(160px, 0.7fr)",
-    alignItems: "center",
-    gap: "20px",
-    padding: "15px 14px",
-    boxSizing: "border-box",
-    background: "rgba(91,61,155,0.45)",
-    borderBottom:
-      "1px solid rgba(255,255,255,0.07)",
-  },
-
-  scheduleDay: {
-    fontSize: "14px",
-    color: "#ffffff",
-    fontWeight: 700,
-  },
-
-  scheduleTime: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    fontSize: "13px",
-    color: "#ffffff",
-  },
-
-  timeIcon: {
-    color: "#60a5fa",
-    flexShrink: 0,
-  },
-
-  scheduleCourse: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    minWidth: 0,
-  },
-
-  scheduleRoom: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    minWidth: 0,
-  },
-
-  smallLabel: {
-    color: "#9189b6",
-    fontSize: "10px",
-    fontWeight: 600,
-  },
-
-  roomValue: {
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    color: "#ffffff",
-    fontSize: "13px",
-  },
-
-  emptyState: {
-    padding: "35px 20px",
-    textAlign: "center",
-    color: "#aaa4c9",
-    fontSize: "14px",
-  },
-
-  loadingPage: {
-    minHeight: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    background:
-      "linear-gradient(135deg, #151943 0%, #24165c 45%, #5a168d 100%)",
-    color: "#ffffff",
-    fontFamily: "Inter, system-ui, sans-serif",
-  },
-
-  loadingBox: {
-    textAlign: "center",
-  },
-
-  loadingIcon: {
-    width: "64px",
-    height: "64px",
-    margin: "0 auto 15px",
-    borderRadius: "16px",
-    background:
-      "linear-gradient(135deg, #0ea5e9, #2563eb)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  loadingTitle: {
-    margin: 0,
-    fontSize: "24px",
-  },
-
-  loadingText: {
-    color: "#aaa4c9",
-  },
-};
 
 export default StudentPortal;

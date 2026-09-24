@@ -1,4 +1,38 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CheckCircle2, MessageSquare, Pencil, Send, UserRound } from "lucide-react";
+
 import client from "@/lib/api";
+import { navForRole } from "@/lib/nav";
+import { useIdentity } from "@/hooks/useIdentity";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
+import { SectionCard } from "@/components/common/SectionCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+
+// =====================================================
+// /student-portal/profile — the student's own record (U9 re-skin).
+//
+// Shell and styling are new; every data rule from the Phase 8 rescope is
+// carried over verbatim:
+//   * identity from `useIdentity()` (`GET /api/auth/me`), never an inline
+//     localStorage parse;
+//   * academic fields (department, semester, year, academic year, register
+//     number) are READ-ONLY and come straight from the resolved identity /
+//     linked Student doc — no invented department, semester, academic year
+//     or email anywhere on this page;
+//   * the two editable fields persist through `PUT /api/students/me` and
+//     never through localStorage;
+//   * `linked === false` renders "Profile not linked — contact your
+//     administrator" instead of data;
+//   * `GET /api/queries` returns this student's own queries only.
+// =====================================================
 
 const api = async (path, options = {}) => {
   const res = await client.request({
@@ -16,69 +50,6 @@ const unwrap = (data, keys = []) => {
   return [];
 };
 
-const styles = {
-  app: { minHeight:"100vh", display:"flex", background:"linear-gradient(135deg,#151943 0%,#24165c 45%,#5a168d 100%)", color:"#fff", fontFamily:"Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" },
-  sidebar:{width:255,minWidth:255,minHeight:"100vh",background:"rgba(12,17,54,.94)",borderRight:"1px solid rgba(255,255,255,.08)",padding:24,boxSizing:"border-box",display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh"},
-  brand:{display:"flex",alignItems:"center",gap:12,marginBottom:48},
-  logo:{width:44,height:44,borderRadius:12,background:"linear-gradient(135deg,#0ea5e9,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center"},
-  brandName:{fontSize:18,fontWeight:800}, brandSub:{fontSize:12,color:"#9ca3c7",marginTop:3},
-  nav:{display:"flex",flexDirection:"column",gap:8},
-  navItem:{width:"100%",minHeight:48,display:"flex",alignItems:"center",gap:14,padding:"0 16px",border:0,borderRadius:12,background:"transparent",color:"#c7cbe3",fontSize:15,fontWeight:600,cursor:"pointer",textAlign:"left"},
-  active:{background:"linear-gradient(90deg,rgba(37,99,235,.45),rgba(37,99,235,.25))",color:"#fff",boxShadow:"inset 0 0 0 1px rgba(96,165,250,.35)"},
-  bottom:{marginTop:"auto"}, main:{flex:1,padding:"38px 32px 60px",minWidth:0,boxSizing:"border-box"},
-  header:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,marginBottom:28},
-  title:{margin:0,fontSize:42,fontWeight:800,letterSpacing:"-1px"}, subtitle:{margin:"10px 0 0",color:"#c7cbe3",fontSize:16},
-  card:{borderRadius:18,background:"linear-gradient(145deg,rgba(62,37,123,.86),rgba(64,30,116,.86))",border:"1px solid rgba(139,92,246,.3)",overflow:"hidden",marginBottom:22},
-  cardHead:{padding:"22px 24px",borderBottom:"1px solid rgba(255,255,255,.08)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16},
-  cardTitle:{margin:0,fontSize:21,fontWeight:750}, muted:{color:"#aaa4c9",fontSize:14},
-  content:{padding:24}, grid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:16},
-  item:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)",border:"1px solid rgba(167,139,250,.15)"},
-  label:{display:"block",fontSize:11,color:"#9189b6",fontWeight:700,marginBottom:7,textTransform:"uppercase"},
-  value:{fontSize:15,fontWeight:700,color:"#fff"}, button:{border:"1px solid rgba(139,92,246,.45)",background:"rgba(91,61,155,.35)",color:"#ddd6fe",borderRadius:10,padding:"10px 15px",fontWeight:650,cursor:"pointer"},
-  tableWrap:{overflowX:"auto"}, table:{width:"100%",borderCollapse:"collapse",minWidth:850}, th:{textAlign:"left",padding:"14px 16px",fontSize:11,color:"#aaa4c9",textTransform:"uppercase",borderBottom:"1px solid rgba(255,255,255,.1)"}, td:{padding:"16px",borderBottom:"1px solid rgba(255,255,255,.07)",fontSize:14,verticalAlign:"middle"},
-  badge:{display:"inline-block",padding:"5px 9px",borderRadius:999,background:"rgba(37,99,235,.2)",color:"#93c5fd",fontSize:11,fontWeight:700},
-  error:{padding:14,marginBottom:18,borderRadius:12,background:"rgba(239,68,68,.15)",border:"1px solid rgba(239,68,68,.4)",color:"#fecaca"},
-  empty:{padding:45,textAlign:"center",color:"#aaa4c9"}, loading:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#151943",color:"#fff"},
-  notification:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)",border:"1px solid rgba(167,139,250,.15)",marginBottom:12},
-  unread:{border:"1px solid rgba(96,165,250,.45)",background:"rgba(37,99,235,.14)"},
-  profileGrid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:18},
-  profileBox:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)"},
-  input:{width:"100%",boxSizing:"border-box",padding:"12px 13px",borderRadius:10,border:"1px solid rgba(167,139,250,.3)",background:"rgba(20,15,60,.4)",color:"#fff",outline:"none"},
-};
-
-const Nav = ({active, navigate, count}) => (
-  <aside style={styles.sidebar}>
-    <div style={styles.brand}>
-      <div style={styles.logo}>🎓</div>
-      <div><div style={styles.brandName}>Smart Scheduler</div><div style={styles.brandSub}>Student Portal</div></div>
-    </div>
-    <nav style={styles.nav}>
-      {[
-        ["Dashboard","/student-portal","▦"],
-        ["My Timetable","/student-portal/timetable","▣"],
-        ["My Courses","/student-portal/courses","▤"],
-        ["Notifications","/student-portal/notifications","♧"],
-        ["My Profile","/student-portal/profile","♙"],
-      ].map(([label,path,icon]) => (
-        <button key={path} style={{...styles.navItem,...(active===path?styles.active:{})}} onClick={()=>navigate(path)}>
-          <span style={{fontSize:19,width:20}}>{icon}</span><span>{label}</span>
-          {label==="Notifications" && count>0 && <span style={{marginLeft:"auto",background:"#ff365f",borderRadius:999,padding:"3px 8px",fontSize:11}}>{count}</span>}
-        </button>
-      ))}
-    </nav>
-    <div style={styles.bottom}>
-      <button style={styles.navItem} onClick={()=>{localStorage.removeItem("token");localStorage.removeItem("user");navigate("/login")}}>↪ <span>Logout</span></button>
-    </div>
-  </aside>
-);
-
-const Page = ({active, navigate, children, count=0}) => <div style={styles.app}><Nav active={active} navigate={navigate} count={count}/><main style={styles.main}>{children}</main></div>;
-
-import React,{useEffect,useState} from "react";
-import {useNavigate} from "react-router-dom";
-
-import useIdentity from "@/hooks/useIdentity";
-
 const NOT_LINKED = "Profile not linked — contact your administrator";
 
 // Rendered for anything the record genuinely does not carry. There are no
@@ -89,6 +60,16 @@ const UNKNOWN = "—";
 
 const show = (value) =>
   value === undefined || value === null || value === "" ? UNKNOWN : String(value);
+
+/** Read-only field tile. */
+function Field({ label, value }) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      <div className="text-[11px] tracking-wide text-muted-foreground uppercase">{label}</div>
+      <div className="mt-1 text-sm font-medium text-foreground">{show(value)}</div>
+    </div>
+  );
+}
 
 function MyProfile() {
   const navigate = useNavigate();
@@ -161,12 +142,18 @@ function MyProfile() {
     };
   }, [identityLoading, hasUser]);
 
-  if (identityLoading) {
-    return <div style={styles.loading}>Loading profile...</div>;
-  }
+  const { brand, nav, quickActions } = navForRole("student");
 
-  if (!user) {
-    return <div style={styles.loading}>Loading profile...</div>;
+  if (identityLoading || !user) {
+    return (
+      <AppShell brand={brand} nav={nav} quickActions={quickActions}>
+        <PageHeader title="My Profile" description="View and manage your student information" />
+        <div className="space-y-4">
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-64 w-full rounded-xl" />
+        </div>
+      </AppShell>
+    );
   }
 
   // Academic fields: straight from the resolved identity / linked Student
@@ -205,9 +192,7 @@ function MyProfile() {
       refresh();
     } catch (err) {
       console.error("Profile save error:", err);
-      setError(
-        err?.response?.data?.error || "Unable to save your profile. Please try again."
-      );
+      setError(err?.response?.data?.error || "Unable to save your profile. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -248,298 +233,210 @@ function MyProfile() {
       setTimeout(() => setQueryNotice(""), 2600);
     } catch (err) {
       console.error("Query submit error:", err);
-      setQueryError(
-        err?.response?.data?.error || "Unable to send your query. Please try again."
-      );
+      setQueryError(err?.response?.data?.error || "Unable to send your query. Please try again.");
     } finally {
       setQueryBusy(false);
     }
   };
 
-  // Read-only field.
-  const renderField = (label, value) => (
-    <div style={styles.profileBox}>
-      <span style={styles.label}>{label}</span>
-      <div style={styles.value}>{show(value)}</div>
-    </div>
-  );
-
   // Editable field — persisted by `save()` through PUT /api/students/me.
   const renderEditableField = (label, key) => (
-    <div style={styles.profileBox}>
-      <span style={styles.label}>{label}</span>
+    <div className="rounded-lg border border-border bg-background p-4">
+      <Label htmlFor={`profile-${key}`} className="text-[11px] tracking-wide text-muted-foreground uppercase">
+        {label}
+      </Label>
       {editing ? (
-        <input
-          style={styles.input}
+        <Input
+          id={`profile-${key}`}
+          className="mt-2"
           value={form[key] ?? ""}
           onChange={(e) => setForm({ ...form, [key]: e.target.value })}
         />
       ) : (
-        <div style={styles.value}>{show(form[key])}</div>
+        <div className="mt-1 text-sm font-medium text-foreground">{show(form[key])}</div>
       )}
     </div>
   );
 
   return (
-    <Page
-      active="/student-portal/profile"
-      navigate={navigate}
-      count={0}
+    <AppShell
+      brand={brand}
+      nav={nav}
+      quickActions={quickActions}
+      chatbot={{ context: { page: "my-profile", linked } }}
     >
-      {/* HEADER */}
-      <div style={styles.header}>
-        <div>
-          <h1 style={styles.title}>
-            My Profile
-          </h1>
-
-          <p style={styles.subtitle}>
-            View and manage your student information
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-          }}
-        >
-          {linked && (!editing ? (
-            <button
-              style={styles.button}
-              onClick={() => setEditing(true)}
-            >
-              Edit Profile
-            </button>
+      <PageHeader
+        title="My Profile"
+        description="View and manage your student information"
+        actions={
+          linked &&
+          (!editing ? (
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil className="size-4" />
+              Edit profile
+            </Button>
           ) : (
             <>
-              <button
-                style={styles.button}
-                onClick={cancelEdit}
-                disabled={saving}
-              >
+              <Button variant="outline" onClick={cancelEdit} disabled={saving}>
                 Cancel
-              </button>
-
-              <button
-                style={{
-                  ...styles.button,
-                  background:
-                    "rgba(37,99,235,.35)",
-                }}
-                onClick={save}
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
+              </Button>
+              <Button onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
             </>
-          ))}
-        </div>
-      </div>
+          ))
+        }
+      />
 
-      {/* ERROR */}
-      {error && (
-        <div style={styles.error}>
-          {error}
-        </div>
-      )}
+      <div className="space-y-6">
+        {error && (
+          <Callout tone="destructive" title="Could not save your profile">
+            {error}
+          </Callout>
+        )}
 
-      {!error && identityError && (
-        <div style={styles.error}>
-          {identityError}
-        </div>
-      )}
+        {!error && identityError && (
+          <Callout tone="warning" title="Profile could not be refreshed">
+            {identityError}
+          </Callout>
+        )}
 
-      {/* SUCCESS */}
-      {saved && (
-        <div
-          style={{
-            ...styles.notification,
-            ...styles.unread,
-          }}
+        {saved && (
+          <Callout tone="success" title="Profile saved" icon={CheckCircle2}>
+            Your changes have been stored on your student record.
+          </Callout>
+        )}
+
+        <SectionCard
+          title="Personal & Academic Details"
+          description={
+            linked
+              ? "Academic details come from your student record; only phone and section are editable."
+              : "No student record is linked to this account."
+          }
+          icon={UserRound}
         >
-          Profile saved successfully.
-        </div>
-      )}
-
-      {/* PROFILE CARD */}
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <div>
-            <h2 style={styles.cardTitle}>
-              Personal & Academic Details
-            </h2>
-
-            <p style={styles.muted}>
-              {linked
-                ? "Academic details come from your student record; only phone and section are editable."
-                : "No student record is linked to this account."}
-            </p>
-          </div>
-        </div>
-
-        <div style={styles.content}>
           {!linked ? (
-            <div style={styles.empty}>{NOT_LINKED}</div>
+            <EmptyState
+              icon={UserRound}
+              title={NOT_LINKED}
+              description="Your academic details appear here once an administrator links your account to a student record."
+            />
           ) : (
-            <div style={styles.profileGrid}>
-
-              {/* NAME */}
-              {renderField("Name", name)}
-
-              {/* EMAIL */}
-              {renderField("Email", email)}
-
-              {/* REGISTER NUMBER */}
-              {renderField("Register Number", registerNumber)}
-
-              {/* DEPARTMENT */}
-              {renderField("Department", department)}
-
-              {/* SEMESTER */}
-              {renderField("Semester", semester)}
-
-              {/* YEAR */}
-              {renderField("Year", year)}
-
-              {/* ACADEMIC YEAR */}
-              {renderField("Academic Year", academicYear)}
-
-              {/* ROLE */}
-              {renderField("Role", role)}
-
-              {/* SECTION (editable) */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Name" value={name} />
+              <Field label="Email" value={email} />
+              <Field label="Register Number" value={registerNumber} />
+              <Field label="Department" value={department} />
+              <Field label="Semester" value={semester} />
+              <Field label="Year" value={year} />
+              <Field label="Academic Year" value={academicYear} />
+              <Field label="Role" value={role} />
               {renderEditableField("Section", "section")}
-
-              {/* PHONE (editable) */}
               {renderEditableField("Phone", "phone")}
-
             </div>
           )}
-        </div>
-      </div>
+        </SectionCard>
 
-      {/* QUERIES CARD */}
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <div>
-            <h2 style={styles.cardTitle}>
-              Ask a Query
-            </h2>
-
-            <p style={styles.muted}>
-              Send a question to the administrator and read their replies
-            </p>
-          </div>
-        </div>
-
-        <div style={styles.content}>
-          {queryError && (
-            <div style={styles.error}>
-              {queryError}
-            </div>
-          )}
-
-          {queryNotice && (
-            <div
-              style={{
-                ...styles.notification,
-                ...styles.unread,
-              }}
-            >
-              {queryNotice}
-            </div>
-          )}
-
-          <form onSubmit={submitQuery}>
-            <div style={{ marginBottom: 12 }}>
-              <span style={styles.label}>Subject</span>
-              <input
-                style={styles.input}
-                value={queryForm.subject}
-                placeholder="What is your query about?"
-                onChange={(e) =>
-                  setQueryForm({ ...queryForm, subject: e.target.value })
-                }
-              />
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <span style={styles.label}>Message</span>
-              <textarea
-                style={{ ...styles.input, minHeight: 96, resize: "vertical" }}
-                value={queryForm.message}
-                placeholder="Describe your query"
-                onChange={(e) =>
-                  setQueryForm({ ...queryForm, message: e.target.value })
-                }
-              />
-            </div>
-
-            <button
-              type="submit"
-              style={{
-                ...styles.button,
-                background: "rgba(37,99,235,.35)",
-              }}
-              disabled={queryBusy}
-            >
-              {queryBusy ? "Sending..." : "Send Query"}
-            </button>
-          </form>
-
-          <div style={{ marginTop: 22 }}>
-            <span style={styles.label}>Your Queries</span>
-
-            {queries.length ? (
-              queries.map((q, i) => (
-                <div
-                  key={q?._id || q?.id || i}
-                  style={styles.notification}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <strong>{q?.subject || "Query"}</strong>
-                    <span style={styles.badge}>
-                      {String(q?.status || "open").toUpperCase()}
-                    </span>
-                  </div>
-
-                  <p
-                    style={{
-                      color: "#c7cbe3",
-                      lineHeight: 1.6,
-                      margin: "9px 0 5px",
-                    }}
-                  >
-                    {q?.message}
-                  </p>
-
-                  {q?.reply && (
-                    <p style={{ color: "#ddd6fe", lineHeight: 1.6, margin: "0 0 5px" }}>
-                      <strong>Reply:</strong> {q.reply}
-                    </p>
-                  )}
-
-                  {q?.createdAt && (
-                    <small style={styles.muted}>
-                      {new Date(q.createdAt).toLocaleString()}
-                    </small>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div style={styles.empty}>You have not raised any queries yet.</div>
+        <SectionCard
+          title="Ask a Query"
+          description="Send a question to the administrator and read their replies"
+          icon={MessageSquare}
+        >
+          <div className="space-y-4">
+            {queryError && (
+              <Callout tone="destructive" title="Query failed">
+                {queryError}
+              </Callout>
             )}
+
+            {queryNotice && (
+              <Callout tone="success" title="Query sent" icon={CheckCircle2}>
+                {queryNotice}
+              </Callout>
+            )}
+
+            <form onSubmit={submitQuery} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="query-subject">Subject</Label>
+                <Input
+                  id="query-subject"
+                  value={queryForm.subject}
+                  placeholder="What is your query about?"
+                  onChange={(e) => setQueryForm({ ...queryForm, subject: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="query-message">Message</Label>
+                <Textarea
+                  id="query-message"
+                  className="min-h-24"
+                  value={queryForm.message}
+                  placeholder="Describe your query"
+                  onChange={(e) => setQueryForm({ ...queryForm, message: e.target.value })}
+                />
+              </div>
+
+              <Button type="submit" disabled={queryBusy}>
+                <Send className="size-4" />
+                {queryBusy ? "Sending…" : "Send query"}
+              </Button>
+            </form>
+
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+                Your Queries
+              </div>
+
+              {queries.length ? (
+                <ul className="space-y-3">
+                  {queries.map((q, i) => (
+                    <li
+                      key={q?._id || q?.id || i}
+                      className="animate-in rounded-lg border border-border bg-background p-4 fade-in duration-150"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-sm font-semibold text-foreground">
+                          {q?.subject || "Query"}
+                        </h3>
+                        <Badge variant="secondary">
+                          {String(q?.status || "open").toUpperCase()}
+                        </Badge>
+                      </div>
+
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                        {q?.message}
+                      </p>
+
+                      {q?.reply && (
+                        <p className="mt-2 rounded-md bg-primary/5 p-3 text-sm leading-relaxed text-foreground">
+                          <span className="font-medium">Reply: </span>
+                          {q.reply}
+                        </p>
+                      )}
+
+                      {q?.createdAt && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {new Date(q.createdAt).toLocaleString()}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <EmptyState
+                  icon={MessageSquare}
+                  title="No queries yet"
+                  description="You have not raised any queries yet."
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </SectionCard>
       </div>
-    </Page>
+    </AppShell>
   );
 }
+
 export default MyProfile;

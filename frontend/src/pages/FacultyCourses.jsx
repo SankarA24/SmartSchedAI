@@ -1,21 +1,26 @@
-import { useEffect, useState } from "react";
-import api from "@/lib/api";
-
-import {
-  LayoutDashboard,
-  Calendar,
-  BookOpen,
-  Bell,
-  User,
-  LogOut,
-  GraduationCap,
-  Building2,
-  Clock,
-} from "lucide-react";
-
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { BookOpen, Building2, CalendarDays, Clock, ShieldAlert } from "lucide-react";
 
+import api from "@/lib/api";
+import { navForRole } from "@/lib/nav";
 import useIdentity from "@/hooks/useIdentity";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { SectionCard } from "@/components/common/SectionCard";
+import { StatCard } from "@/components/common/StatCard";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+
+// =====================================================
+// /faculty-portal/courses — the courses this faculty member teaches.
+//
+// Scoping (unchanged by the U9 re-skin, and the whole point of this page):
+// the list is the DISTINCT courses appearing in this user's OWN timetable
+// entries, never the course catalogue. `GET /api/courses` is fetched only to
+// resolve those ids to names; a scheduled id with no catalogue row is shown
+// as the bare id rather than padded with invented values.
+// =====================================================
 
 export default function FacultyCourses() {
   const navigate = useNavigate();
@@ -167,7 +172,7 @@ export default function FacultyCourses() {
   );
 
   // ---------------------------------------------
-  // Notifications
+  // Notifications (badge only)
   // ---------------------------------------------
 
   const unreadNotifications = notifications.filter(
@@ -186,41 +191,28 @@ export default function FacultyCourses() {
   };
 
   // ---------------------------------------------
-  // Navigation
+  // Shell — one shared sidebar/header for every portal, fed by lib/nav.js.
   // ---------------------------------------------
 
-  const navigationItems = [
-    {
-      id: "dashboard",
-      label: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/faculty-portal",
+  const { brand, nav } = navForRole("faculty");
+
+  const navItems = useMemo(
+    () =>
+      nav.map((item) =>
+        item.badgeKey === "unread" ? { ...item, badge: unreadNotifications } : item
+      ),
+    [nav, unreadNotifications]
+  );
+
+  const shellProps = {
+    brand,
+    nav: navItems,
+    onLogout: handleLogout,
+    header: {
+      notifications: unreadNotifications,
+      onNotificationsClick: () => navigate("/faculty-portal/notifications"),
     },
-    {
-      id: "timetable",
-      label: "My Timetable",
-      icon: Calendar,
-      path: "/faculty-portal/timetable",
-    },
-    {
-      id: "courses",
-      label: "My Courses",
-      icon: BookOpen,
-      path: "/faculty-portal/courses",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/faculty-portal/notifications",
-    },
-    {
-      id: "profile",
-      label: "My Profile",
-      icon: User,
-      path: "/faculty-portal/profile",
-    },
-  ];
+  };
 
   // ---------------------------------------------
   // Loading
@@ -228,62 +220,19 @@ export default function FacultyCourses() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+      <AppShell {...shellProps}>
+        <div className="animate-in space-y-6 fade-in duration-150">
+          <div className="h-9 w-64 animate-pulse rounded-md bg-muted" />
 
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
-
-        {/* Sidebar */}
-        <div className="w-64 bg-slate-800/30 backdrop-blur-xl border-r border-slate-700/50 shadow-2xl relative z-10">
-          <div className="p-6 space-y-8">
-
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center">
-                <GraduationCap className="w-6 h-6 text-white" />
-              </div>
-
-              <div>
-                <h2 className="text-lg font-bold text-white">
-                  Smart Scheduler
-                </h2>
-
-                <p className="text-xs text-slate-400">
-                  Faculty Portal
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {[1, 2, 3, 4, 5].map((item) => (
-                <div
-                  key={item}
-                  className="h-10 bg-slate-700/30 animate-pulse rounded-lg"
-                />
-              ))}
-            </div>
-
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((key) => (
+              <div key={key} className="h-24 animate-pulse rounded-xl bg-muted" />
+            ))}
           </div>
+
+          <div className="h-72 animate-pulse rounded-xl bg-muted" />
         </div>
-
-        {/* Main */}
-        <div className="flex-1 p-8 relative z-10">
-
-          <div className="max-w-7xl mx-auto space-y-8">
-
-            <div className="h-12 bg-slate-700/50 animate-pulse rounded-xl w-80" />
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {[1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="h-32 bg-slate-800/50 animate-pulse rounded-2xl"
-                />
-              ))}
-            </div>
-
-          </div>
-        </div>
-
-      </div>
+      </AppShell>
     );
   }
 
@@ -296,31 +245,26 @@ export default function FacultyCourses() {
 
   if (!linked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+      <AppShell {...shellProps}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="max-w-md text-center">
+            <ShieldAlert className="mx-auto mb-4 size-10 text-muted-foreground" />
 
-        <div className="text-center max-w-md">
+            <h1 className="text-xl font-semibold text-foreground">
+              Profile not linked — contact your administrator
+            </h1>
 
-          <User className="w-16 h-16 text-amber-400 mx-auto mb-5" />
+            <p className="mt-2 text-sm text-muted-foreground">
+              This account is not linked to a faculty record, so no courses can
+              be shown for it.
+            </p>
 
-          <h1 className="text-2xl font-bold text-white mb-3">
-            Profile not linked — contact your administrator
-          </h1>
-
-          <p className="text-slate-400 mb-6">
-            This account is not linked to a faculty record, so no courses can
-            be shown for it.
-          </p>
-
-          <button
-            onClick={handleLogout}
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white"
-          >
-            Return to Login
-          </button>
-
+            <Button onClick={handleLogout} className="mt-6">
+              Return to Login
+            </Button>
+          </div>
         </div>
-
-      </div>
+      </AppShell>
     );
   }
 
@@ -329,521 +273,158 @@ export default function FacultyCourses() {
   // ---------------------------------------------
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+    <AppShell
+      {...shellProps}
+      chatbot={{
+        context: { page: "faculty-courses", courses: facultyCourses.length },
+      }}
+    >
+      <PageHeader
+        title="My Courses"
+        description="Courses currently assigned to you, derived from your own timetable entries."
+        actions={
+          <Button variant="outline" asChild>
+            <Link to="/faculty-portal/timetable">
+              <CalendarDays className="size-4" />
+              View timetable
+            </Link>
+          </Button>
+        }
+      />
 
-      {/* Background effects */}
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StatCard
+            label="Assigned courses"
+            value={facultyCourses.length}
+            icon={BookOpen}
+          />
 
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
+          <StatCard
+            label="Scheduled classes"
+            value={facultySchedule.length}
+            icon={Clock}
+          />
 
-      <div className="absolute inset-0">
+          <StatCard
+            label="Department"
+            value={faculty?.department || user?.department || "Not specified"}
+            icon={Building2}
+          />
+        </div>
 
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
-
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-pulse" />
-
-      </div>
-
-      {/* ==================================================
-          SIDEBAR
-      ================================================== */}
-
-      <div className="w-64 bg-slate-800/30 backdrop-blur-xl border-r border-slate-700/50 shadow-2xl relative z-10">
-
-        <div className="p-6 space-y-8">
-
-          {/* Logo */}
-
-          <div className="flex items-center gap-3">
-
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-
-              <GraduationCap className="w-6 h-6 text-white" />
-
-            </div>
-
-            <div>
-
-              <h2 className="text-lg font-bold text-white">
-                Smart Scheduler
-              </h2>
-
-              <p className="text-xs text-slate-400">
-                Faculty Portal
-              </p>
-
-            </div>
-
-          </div>
-
-          {/* Navigation */}
-
-          <nav className="space-y-2">
-
-            {navigationItems.map((item) => {
-
-              const IconComponent = item.icon;
-
-              const isActive = item.id === "courses";
-
-              return (
-                <Link
-                  key={item.id}
-                  to={item.path}
+        <SectionCard
+          title="Assigned courses"
+          description="Every distinct course that appears in your own timetable entries."
+          icon={BookOpen}
+          actions={
+            <Badge variant="secondary" className="tabular-nums">
+              {facultyCourses.length}
+            </Badge>
+          }
+        >
+          {facultyCourses.length === 0 ? (
+            <EmptyState
+              icon={BookOpen}
+              title="No courses assigned"
+              description="No published timetable schedules a class for your faculty account yet."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {facultyCourses.map((course) => (
+                <SectionCard
+                  key={course._id}
+                  icon={BookOpen}
+                  title={course.name || "Unnamed course"}
+                  description={course.code || course._id}
+                  className="transition-colors hover:border-primary/40"
                 >
+                  <dl className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <dt className="text-xs text-muted-foreground">Department</dt>
+                      <dd className="mt-1 text-sm text-foreground">
+                        {course.department || "Not specified"}
+                      </dd>
+                    </div>
 
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <dt className="text-xs text-muted-foreground">Credits</dt>
+                      <dd className="mt-1 text-sm text-foreground tabular-nums">
+                        {course.credits ?? "—"}
+                      </dd>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <dt className="text-xs text-muted-foreground">Semester</dt>
+                      <dd className="mt-1 text-sm text-foreground tabular-nums">
+                        {course.semester ?? "—"}
+                      </dd>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <dt className="text-xs text-muted-foreground">Academic year</dt>
+                      <dd className="mt-1 text-sm text-foreground">
+                        {course.academicYear ?? course.year ?? "Not specified"}
+                      </dd>
+                    </div>
+                  </dl>
+                </SectionCard>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Teaching schedule"
+          description="How many of your own classes each assigned course accounts for."
+          icon={Clock}
+          actions={
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/faculty-portal/timetable">View timetable</Link>
+            </Button>
+          }
+        >
+          {facultyCourses.length === 0 ? (
+            <EmptyState
+              icon={Clock}
+              title="Nothing scheduled"
+              description="Your teaching schedule appears here once a timetable containing your classes is published."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {facultyCourses.map((course) => {
+                const classCount = facultySchedule.filter(
+                  (entry) =>
+                    String(entry.courseId) ===
+                    String(course._id)
+                ).length;
+
+                return (
                   <div
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group cursor-pointer ${
-                      isActive
-                        ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 text-white shadow-lg shadow-blue-500/10 border border-blue-500/30"
-                        : "text-slate-300 hover:bg-slate-700/30 hover:text-white"
-                    }`}
+                    key={course._id}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
                   >
-
-                    <IconComponent
-                      className={`w-5 h-5 transition-transform duration-300 ${
-                        isActive
-                          ? "text-blue-400"
-                          : "text-slate-400 group-hover:text-slate-200"
-                      } group-hover:scale-110`}
-                    />
-
-                    <span
-                      className={`font-medium ${
-                        isActive ? "text-white" : ""
-                      }`}
-                    >
-                      {item.label}
-                    </span>
-
-                    {item.id === "notifications" &&
-                      unreadNotifications > 0 && (
-                        <div className="ml-auto">
-
-                          <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
-                            {unreadNotifications}
-                          </span>
-
-                        </div>
-                      )}
-
-                  </div>
-
-                </Link>
-              );
-            })}
-
-          </nav>
-
-          {/* Logout */}
-
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-red-500/10 hover:text-red-400 border border-transparent hover:border-red-500/20 transition-all duration-300"
-          >
-
-            <LogOut className="w-5 h-5" />
-
-            <span className="font-medium">
-              Logout
-            </span>
-
-          </button>
-
-        </div>
-
-      </div>
-
-      {/* ==================================================
-          MAIN CONTENT
-      ================================================== */}
-
-      <div className="flex-1 overflow-auto relative z-10">
-
-        <div className="p-8 space-y-8 max-w-7xl mx-auto">
-
-          {/* Header */}
-
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-
-            <div className="space-y-3">
-
-              <h1 className="text-4xl lg:text-5xl font-bold text-white leading-tight bg-gradient-to-r from-white via-blue-100 to-cyan-100 bg-clip-text text-transparent">
-                My Courses
-              </h1>
-
-              <p className="text-lg text-slate-300">
-                Courses currently assigned to you
-              </p>
-
-            </div>
-
-            <div className="flex items-center gap-3">
-
-              <div className="px-4 py-3 rounded-xl bg-slate-800/30 backdrop-blur-sm border border-slate-700/50">
-
-                <p className="text-xs text-slate-400">
-                  Faculty
-                </p>
-
-                <p className="text-sm font-semibold text-white">
-                  {faculty?.name || user?.name || "—"}
-                </p>
-
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* ==================================================
-              STAT CARDS
-          ================================================== */}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-
-            {/* Total Courses */}
-
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-blue-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-6">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-blue-500/20 border border-white/10">
-
-                    <BookOpen className="h-6 w-6 text-blue-400" />
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Total Courses
-                    </p>
-
-                    <p className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-                      {facultyCourses.length}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-blue-500/10 to-cyan-500/10" />
-
-              </div>
-
-            </div>
-
-            {/* Department */}
-
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-emerald-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-6">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-emerald-500/20 border border-white/10">
-
-                    <Building2 className="h-6 w-6 text-emerald-400" />
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Department
-                    </p>
-
-                    <p className="text-xl font-bold text-white">
-                      {faculty?.department || user?.department || "Not specified"}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-emerald-500/10 to-teal-500/10" />
-
-              </div>
-
-            </div>
-
-            {/* Faculty */}
-
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-violet-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-6">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-violet-500/20 border border-white/10">
-
-                    <User className="h-6 w-6 text-violet-400" />
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Faculty
-                    </p>
-
-                    <p className="text-xl font-bold text-white">
-                      {faculty?.name || user?.name || "—"}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-violet-500/10 to-purple-500/10" />
-
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* ==================================================
-              ASSIGNED COURSES
-          ================================================== */}
-
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg">
-
-            {/* Section Header */}
-
-            <div className="border-b border-slate-700/50 p-6">
-
-              <h2 className="text-xl font-semibold text-white">
-                Assigned Courses
-              </h2>
-
-              <p className="text-slate-400 mt-1">
-                Your courses for the current semester
-              </p>
-
-            </div>
-
-            {/* Course List */}
-
-            <div className="p-6">
-
-              {facultyCourses.length === 0 ? (
-
-                <div className="text-center py-12">
-
-                  <BookOpen className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-
-                  <h3 className="text-lg font-semibold text-white mb-2">
-                    No Courses Assigned
-                  </h3>
-
-                  <p className="text-slate-400">
-                    No courses are currently assigned to your faculty account.
-                  </p>
-
-                </div>
-
-              ) : (
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-                  {facultyCourses.map((course) => (
-
-                    <div
-                      key={course._id}
-                      className="p-6 bg-slate-700/20 border border-slate-600/30 rounded-xl hover:bg-slate-600/30 hover:border-blue-500/30 transition-all duration-300"
-                    >
-
-                      {/* Course Header */}
-
-                      <div className="flex items-start justify-between gap-4 mb-5">
-
-                        <div className="flex items-center gap-4">
-
-                          <div className="p-3 rounded-xl bg-blue-500/20 border border-blue-500/20">
-
-                            <BookOpen className="w-6 h-6 text-blue-400" />
-
-                          </div>
-
-                          <div>
-
-                            <h3 className="text-lg font-semibold text-white">
-                              {course.name || "Unnamed Course"}
-                            </h3>
-
-                            <p className="text-sm text-blue-400 mt-1">
-                              {course.code || "—"}
-                            </p>
-
-                          </div>
-
-                        </div>
-
-                      </div>
-
-                      {/* Course Details */}
-
-                      <div className="grid grid-cols-2 gap-4">
-
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-
-                          <p className="text-xs text-slate-500">
-                            Department
-                          </p>
-
-                          <p className="text-sm text-slate-200 mt-1">
-                            {course.department || "Not specified"}
-                          </p>
-
-                        </div>
-
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-
-                          <p className="text-xs text-slate-500">
-                            Credits
-                          </p>
-
-                          <p className="text-sm text-slate-200 mt-1">
-                            {course.credits ?? "—"}
-                          </p>
-
-                        </div>
-
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-
-                          <p className="text-xs text-slate-500">
-                            Semester
-                          </p>
-
-                          <p className="text-sm text-slate-200 mt-1">
-                            {course.semester ?? "—"}
-                          </p>
-
-                        </div>
-
-                        <div className="p-3 bg-slate-800/30 rounded-lg">
-
-                          <p className="text-xs text-slate-500">
-                            Academic Year
-                          </p>
-
-                          <p className="text-sm text-slate-200 mt-1">
-                            {course.academicYear ?? course.year ?? "Not specified"}
-                          </p>
-
-                        </div>
-
-                      </div>
-
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Clock className="size-4" />
                     </div>
 
-                  ))}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {course.name || "Unnamed course"}
+                      </p>
 
-                </div>
-
-              )}
-
-            </div>
-
-          </div>
-
-          {/* ==================================================
-              COURSE SCHEDULE SUMMARY
-          ================================================== */}
-
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg">
-
-            <div className="border-b border-slate-700/50 p-6">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-
-                  <h2 className="text-xl font-semibold text-white">
-                    Teaching Schedule
-                  </h2>
-
-                  <p className="text-slate-400 mt-1">
-                    Classes associated with your assigned courses
-                  </p>
-
-                </div>
-
-                <Link
-                  to="/faculty-portal/timetable"
-                  className="px-4 py-2 rounded-lg border border-slate-600/50 bg-slate-700/30 text-slate-200 hover:bg-slate-600/40 transition-all"
-                >
-                  View Timetable
-                </Link>
-
-              </div>
-
-            </div>
-
-            <div className="p-6">
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-                {facultyCourses.map((course) => {
-
-                  const classCount = facultySchedule.filter(
-                    (entry) =>
-                      String(entry.courseId) ===
-                      String(course._id)
-                  ).length;
-
-                  return (
-
-                    <div
-                      key={course._id}
-                      className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl"
-                    >
-
-                      <div className="flex items-center gap-3">
-
-                        <div className="p-3 rounded-lg bg-violet-500/20">
-
-                          <Clock className="w-5 h-5 text-violet-400" />
-
-                        </div>
-
-                        <div>
-
-                          <p className="text-white font-semibold">
-                            {course.name || "Unnamed Course"}
-                          </p>
-
-                          <p className="text-xs text-slate-400 mt-1">
-                            {classCount} scheduled{" "}
-                            {classCount === 1
-                              ? "class"
-                              : "classes"}
-                          </p>
-
-                        </div>
-
-                      </div>
-
+                      <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                        {classCount} scheduled{" "}
+                        {classCount === 1 ? "class" : "classes"}
+                      </p>
                     </div>
-
-                  );
-                })}
-
-              </div>
-
+                  </div>
+                );
+              })}
             </div>
-
-          </div>
-
-        </div>
-
+          )}
+        </SectionCard>
       </div>
-
-    </div>
+    </AppShell>
   );
 }

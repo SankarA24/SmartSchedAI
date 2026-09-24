@@ -1,4 +1,31 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { BellRing, Inbox } from "lucide-react";
+
 import client from "@/lib/api";
+import { navForRole } from "@/lib/nav";
+import { useIdentity } from "@/hooks/useIdentity";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
+import { SectionCard } from "@/components/common/SectionCard";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+
+// =====================================================
+// /student-portal/notifications — the student's own mail (U9 re-skin).
+//
+// Visual migration only. The data path is untouched:
+//   * identity via `useIdentity()` (`GET /api/auth/me`), not an inline
+//     localStorage parse;
+//   * `GET /api/notifications` is audience-scoped server-side, so the list
+//     that arrives is already this student's own — no client-side guessing
+//     at the audience, and no fabricated rows;
+//   * unread is derived from `isRead` and nothing else;
+//   * `linked === false` still says "Profile not linked — contact your
+//     administrator".
+// =====================================================
 
 const getId = (value) => {
   if (!value) return null;
@@ -26,128 +53,166 @@ const unwrap = (data, keys = []) => {
   return [];
 };
 
-const styles = {
-  app: { minHeight:"100vh", display:"flex", background:"linear-gradient(135deg,#151943 0%,#24165c 45%,#5a168d 100%)", color:"#fff", fontFamily:"Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" },
-  sidebar:{width:255,minWidth:255,minHeight:"100vh",background:"rgba(12,17,54,.94)",borderRight:"1px solid rgba(255,255,255,.08)",padding:24,boxSizing:"border-box",display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh"},
-  brand:{display:"flex",alignItems:"center",gap:12,marginBottom:48},
-  logo:{width:44,height:44,borderRadius:12,background:"linear-gradient(135deg,#0ea5e9,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center"},
-  brandName:{fontSize:18,fontWeight:800}, brandSub:{fontSize:12,color:"#9ca3c7",marginTop:3},
-  nav:{display:"flex",flexDirection:"column",gap:8},
-  navItem:{width:"100%",minHeight:48,display:"flex",alignItems:"center",gap:14,padding:"0 16px",border:0,borderRadius:12,background:"transparent",color:"#c7cbe3",fontSize:15,fontWeight:600,cursor:"pointer",textAlign:"left"},
-  active:{background:"linear-gradient(90deg,rgba(37,99,235,.45),rgba(37,99,235,.25))",color:"#fff",boxShadow:"inset 0 0 0 1px rgba(96,165,250,.35)"},
-  bottom:{marginTop:"auto"}, main:{flex:1,padding:"38px 32px 60px",minWidth:0,boxSizing:"border-box"},
-  header:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,marginBottom:28},
-  title:{margin:0,fontSize:42,fontWeight:800,letterSpacing:"-1px"}, subtitle:{margin:"10px 0 0",color:"#c7cbe3",fontSize:16},
-  card:{borderRadius:18,background:"linear-gradient(145deg,rgba(62,37,123,.86),rgba(64,30,116,.86))",border:"1px solid rgba(139,92,246,.3)",overflow:"hidden",marginBottom:22},
-  cardHead:{padding:"22px 24px",borderBottom:"1px solid rgba(255,255,255,.08)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16},
-  cardTitle:{margin:0,fontSize:21,fontWeight:750}, muted:{color:"#aaa4c9",fontSize:14},
-  content:{padding:24}, grid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:16},
-  item:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)",border:"1px solid rgba(167,139,250,.15)"},
-  label:{display:"block",fontSize:11,color:"#9189b6",fontWeight:700,marginBottom:7,textTransform:"uppercase"},
-  value:{fontSize:15,fontWeight:700,color:"#fff"}, button:{border:"1px solid rgba(139,92,246,.45)",background:"rgba(91,61,155,.35)",color:"#ddd6fe",borderRadius:10,padding:"10px 15px",fontWeight:650,cursor:"pointer"},
-  tableWrap:{overflowX:"auto"}, table:{width:"100%",borderCollapse:"collapse",minWidth:850}, th:{textAlign:"left",padding:"14px 16px",fontSize:11,color:"#aaa4c9",textTransform:"uppercase",borderBottom:"1px solid rgba(255,255,255,.1)"}, td:{padding:"16px",borderBottom:"1px solid rgba(255,255,255,.07)",fontSize:14,verticalAlign:"middle"},
-  badge:{display:"inline-block",padding:"5px 9px",borderRadius:999,background:"rgba(37,99,235,.2)",color:"#93c5fd",fontSize:11,fontWeight:700},
-  error:{padding:14,marginBottom:18,borderRadius:12,background:"rgba(239,68,68,.15)",border:"1px solid rgba(239,68,68,.4)",color:"#fecaca"},
-  empty:{padding:45,textAlign:"center",color:"#aaa4c9"}, loading:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#151943",color:"#fff"},
-  notification:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)",border:"1px solid rgba(167,139,250,.15)",marginBottom:12},
-  unread:{border:"1px solid rgba(96,165,250,.45)",background:"rgba(37,99,235,.14)"},
-  profileGrid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:18},
-  profileBox:{padding:18,borderRadius:14,background:"rgba(91,61,155,.45)"},
-  input:{width:"100%",boxSizing:"border-box",padding:"12px 13px",borderRadius:10,border:"1px solid rgba(167,139,250,.3)",background:"rgba(20,15,60,.4)",color:"#fff",outline:"none"},
-};
-
-const Nav = ({active, navigate, count}) => (
-  <aside style={styles.sidebar}>
-    <div style={styles.brand}>
-      <div style={styles.logo}>🎓</div>
-      <div><div style={styles.brandName}>Smart Scheduler</div><div style={styles.brandSub}>Student Portal</div></div>
-    </div>
-    <nav style={styles.nav}>
-      {[
-        ["Dashboard","/student-portal","▦"],
-        ["My Timetable","/student-portal/timetable","▣"],
-        ["My Courses","/student-portal/courses","▤"],
-        ["Notifications","/student-portal/notifications","♧"],
-        ["My Profile","/student-portal/profile","♙"],
-      ].map(([label,path,icon]) => (
-        <button key={path} style={{...styles.navItem,...(active===path?styles.active:{})}} onClick={()=>navigate(path)}>
-          <span style={{fontSize:19,width:20}}>{icon}</span><span>{label}</span>
-          {label==="Notifications" && count>0 && <span style={{marginLeft:"auto",background:"#ff365f",borderRadius:999,padding:"3px 8px",fontSize:11}}>{count}</span>}
-        </button>
-      ))}
-    </nav>
-    <div style={styles.bottom}>
-      <button style={styles.navItem} onClick={()=>{localStorage.removeItem("token");localStorage.removeItem("user");navigate("/login")}}>↪ <span>Logout</span></button>
-    </div>
-  </aside>
-);
-
-const Page = ({active, navigate, children, count=0}) => <div style={styles.app}><Nav active={active} navigate={navigate} count={count}/><main style={styles.main}>{children}</main></div>;
-
-import React,{useEffect,useState} from "react";
-import {useNavigate} from "react-router-dom";
-
-import useIdentity from "@/hooks/useIdentity";
-
 const NOT_LINKED = "Profile not linked — contact your administrator";
 
-function Notifications(){
- const navigate=useNavigate();
- // Identity from the shared hook only — the page no longer re-parses the
- // cached `user` blob out of localStorage.
- const {user, linked, loading:identityLoading, error:identityError}=useIdentity();
- const [items,setItems]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
- // Stable boolean so the fetch does not run again when the hook swaps the
- // cached identity for the /auth/me answer.
- const hasUser=Boolean(user);
+function Notifications() {
+  const navigate = useNavigate();
 
- // `GET /api/notifications` is audience-scoped server-side (global, this
- // role, or addressed to this user id), so whatever comes back is already
- // this student's own mail. No client-side guessing at the audience.
- useEffect(()=>{
-  if(identityLoading)return;
-  if(!hasUser){navigate("/login");return;}
-  let cancelled=false;
-  (async()=>{
-   try{
-    const d=await api("/api/notifications");
-    if(!cancelled)setItems(unwrap(d,["notifications","data","results"]));
-   }catch(e){
-    console.error(e);
-    if(!cancelled)setError("Unable to load notifications.");
-   }finally{
-    if(!cancelled)setLoading(false);
-   }
-  })();
-  return()=>{cancelled=true;};
- },[identityLoading,hasUser,navigate]);
+  // Identity from the shared hook only — the page no longer re-parses the
+  // cached `user` blob out of localStorage.
+  const { user, linked, loading: identityLoading, error: identityError } = useIdentity();
 
- // No "mark as read" action here: Notification.isRead is a single global flag
- // (no recipient/readBy field) and PUT /api/notifications/:id/read has no owner
- // check, so a student marking one read would hide it for every user.
- // `audienceFilter` on that route is a visibility test, not an ownership test:
- // every student matches {audience:"student"} and every user matches
- // {audience:"all"}, so the flip would land on the one shared document.
- // Per-user read state (a `readBy` array on Notification, $addToSet in the
- // route, unread derived per caller) has to exist before this page can offer
- // the control.
- const unread=items.filter(n=>!n.isRead).length;
- if(identityLoading||loading)return <div style={styles.loading}>Loading notifications...</div>;
- return <Page active="/student-portal/notifications" navigate={navigate} count={unread}>
-  <div style={styles.header}><div><h1 style={styles.title}>Notifications</h1><p style={styles.subtitle}>Important updates and announcements</p></div><button style={styles.button} onClick={()=>navigate("/student-portal")}>Dashboard →</button></div>
-  {error&&<div style={styles.error}>{error}</div>}
-  {!error&&identityError&&<div style={styles.error}>{identityError}</div>}
-  {/* An unlinked student still receives role-wide announcements, so the
-      list stays — but the page says plainly that the account has no
-      student record behind it. */}
-  {!linked&&<div style={styles.error}>{NOT_LINKED}</div>}
-  <div style={styles.card}><div style={styles.cardHead}><div><h2 style={styles.cardTitle}>All Notifications</h2><p style={styles.muted}>{unread} unread</p></div></div><div style={styles.content}>
-   {items.length?items.map((n,i)=>{const isUnread=!n.isRead;const id=getId(n._id||n.id);return <div key={id||i} style={{...styles.notification,...(isUnread?styles.unread:{})}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><strong>{n.title||n.subject||n.type||"Notification"}</strong>{isUnread&&<span style={styles.badge}>NEW</span>}</div>
-    <p style={{color:"#c7cbe3",lineHeight:1.6,margin:"9px 0 5px"}}>{n.message||n.content||n.description||"No message available."}</p>
-    {(n.createdAt||n.date)&&<small style={styles.muted}>{new Date(n.createdAt||n.date).toLocaleString()}</small>}
-   </div>}) : <div style={styles.empty}>No notifications found.</div>}
-  </div></div>
- </Page>
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Stable boolean so the fetch does not run again when the hook swaps the
+  // cached identity for the /auth/me answer.
+  const hasUser = Boolean(user);
+
+  // `GET /api/notifications` is audience-scoped server-side (global, this
+  // role, or addressed to this user id), so whatever comes back is already
+  // this student's own mail. No client-side guessing at the audience.
+  useEffect(() => {
+    if (identityLoading) return;
+    if (!hasUser) {
+      navigate("/login");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await api("/api/notifications");
+        if (!cancelled) setItems(unwrap(d, ["notifications", "data", "results"]));
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setError("Unable to load notifications.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [identityLoading, hasUser, navigate]);
+
+  // No "mark as read" action here: Notification.isRead is a single global flag
+  // (no recipient/readBy field) and PUT /api/notifications/:id/read has no owner
+  // check, so a student marking one read would hide it for every user.
+  // `audienceFilter` on that route is a visibility test, not an ownership test:
+  // every student matches {audience:"student"} and every user matches
+  // {audience:"all"}, so the flip would land on the one shared document.
+  // Per-user read state (a `readBy` array on Notification, $addToSet in the
+  // route, unread derived per caller) has to exist before this page can offer
+  // the control. Read state is therefore still read from `isRead`, and only
+  // from `isRead`.
+  const unread = useMemo(() => items.filter((n) => !n.isRead).length, [items]);
+
+  const { brand, nav, quickActions } = navForRole("student");
+  // The sidebar badge is fed from the same `isRead` count the list uses.
+  const navWithBadge = useMemo(
+    () => nav.map((item) => (item.badgeKey === "unread" ? { ...item, badge: unread } : item)),
+    [nav, unread]
+  );
+
+  const busy = identityLoading || loading;
+
+  return (
+    <AppShell
+      brand={brand}
+      nav={navWithBadge}
+      quickActions={quickActions}
+      header={{ notifications: unread }}
+      chatbot={{ context: { page: "student-notifications", unread } }}
+    >
+      <PageHeader
+        title="Notifications"
+        description="Important updates and announcements"
+        actions={
+          <Badge variant={unread > 0 ? "default" : "secondary"}>
+            {busy ? "…" : `${unread} unread`}
+          </Badge>
+        }
+      />
+
+      <div className="space-y-6">
+        {error && (
+          <Callout tone="destructive" title="Could not load notifications">
+            {error}
+          </Callout>
+        )}
+
+        {!error && identityError && (
+          <Callout tone="warning" title="Profile could not be refreshed">
+            {identityError}
+          </Callout>
+        )}
+
+        {/* An unlinked student still receives role-wide announcements, so the
+            list stays — but the page says plainly that the account has no
+            student record behind it. */}
+        {!linked && !busy && (
+          <Callout tone="warning" title="No student record linked">
+            {NOT_LINKED}
+          </Callout>
+        )}
+
+        <SectionCard
+          title="All Notifications"
+          description={busy ? "Loading your notifications…" : `${unread} unread`}
+          icon={BellRing}
+        >
+          {busy ? (
+            <div className="space-y-3">
+              {[0, 1, 2].map((key) => (
+                <Skeleton key={key} className="h-24 w-full rounded-lg" />
+              ))}
+            </div>
+          ) : items.length ? (
+            <ul className="space-y-3">
+              {items.map((n, i) => {
+                const isUnread = !n.isRead;
+                const id = getId(n._id || n.id);
+                const timestamp = n.createdAt || n.date;
+                return (
+                  <li
+                    key={id || i}
+                    className={cn(
+                      "animate-in rounded-lg border p-4 fade-in duration-150 transition-colors",
+                      isUnread
+                        ? "border-primary/40 bg-primary/5"
+                        : "border-border bg-background"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        {n.title || n.subject || n.type || "Notification"}
+                      </h3>
+                      {isUnread && <Badge>New</Badge>}
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      {n.message || n.content || n.description || "No message available."}
+                    </p>
+                    {timestamp && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {new Date(timestamp).toLocaleString()}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <EmptyState
+              icon={Inbox}
+              title="No notifications found"
+              description="Announcements addressed to you or to all students will appear here."
+            />
+          )}
+        </SectionCard>
+      </div>
+    </AppShell>
+  );
 }
+
 export default Notifications;

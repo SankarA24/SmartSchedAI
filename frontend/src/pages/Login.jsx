@@ -13,6 +13,23 @@ import {
   AlertCircle,
 } from "lucide-react";
 import api from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+// =====================================================
+// /login (U9)
+//
+// Tokenization only. The markup, the copy, the role selector and the whole
+// submit path below are byte-for-byte the behaviour of the previous version;
+// the only thing that changed is that the `styles` object of inline CSS is
+// gone and every colour now comes from a design token, so this page follows
+// the light/dark theme like the rest of the app. Layout geometry (the
+// 1050x650 two-column card, the 0.95fr/1.05fr split, every spacing value) is
+// reproduced exactly.
+// =====================================================
+
+/** Shared geometry for both text inputs; only the right padding differs. */
+const INPUT_CLASS =
+  "h-[50px] w-full rounded-[10px] border border-border bg-background pl-[45px] text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40";
 
 function Login() {
   const navigate = useNavigate();
@@ -110,53 +127,53 @@ function Login() {
   };
 
   return (
-    <div style={styles.page}>
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background p-[30px]">
       {/* Background decoration */}
-      <div style={styles.glowOne}></div>
-      <div style={styles.glowTwo}></div>
+      <div className="pointer-events-none absolute -top-[220px] -left-[180px] size-[500px] rounded-full bg-primary/15 blur-[100px]"></div>
+      <div className="pointer-events-none absolute -right-[180px] -bottom-[250px] size-[550px] rounded-full bg-chart-4/15 blur-[110px]"></div>
 
-      <div style={styles.loginWrapper}>
+      <div className="relative z-[2] grid min-h-[650px] w-full max-w-[1050px] grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-3xl border border-border bg-card shadow-md">
         {/* Left Branding Panel */}
-        <div style={styles.brandPanel}>
-          <div style={styles.brandIcon}>
+        <div className="flex flex-col justify-center bg-primary px-12 py-[55px] text-primary-foreground">
+          <div className="mb-[25px] flex size-16 items-center justify-center rounded-[18px] bg-primary-foreground/15">
             <GraduationCap size={34} strokeWidth={2} />
           </div>
 
-          <h1 style={styles.brandTitle}>
-            SmartSched<span style={styles.brandAccent}>AI</span>
+          <h1 className="m-0 text-[38px] font-extrabold tracking-[-1.2px] text-primary-foreground/80">
+            SmartSched<span className="text-primary-foreground">AI</span>
           </h1>
 
-          <p style={styles.brandSubtitle}>
+          <p className="mt-3 mb-[25px] text-[18px] leading-[1.55] text-primary-foreground/80">
             AI-Enabled Smart Classroom &
             <br />
             Timetable Scheduler
           </p>
 
-          <div style={styles.brandDivider}></div>
+          <div className="mb-[25px] h-[3px] w-[55px] rounded-[10px] bg-primary-foreground/40"></div>
 
-          <p style={styles.brandDescription}>
+          <p className="m-0 max-w-[390px] text-sm leading-[1.7] text-primary-foreground/70">
             Intelligent scheduling for higher education
             institutions. Manage classrooms, faculty,
             courses and timetables in one place.
           </p>
 
-          <div style={styles.features}>
-            <div style={styles.feature}>
-              <div style={styles.featureIcon}>
+          <div className="mt-[35px] flex flex-col gap-[15px]">
+            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
+              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
                 <GraduationCap size={18} />
               </div>
               <span>Smart Academic Management</span>
             </div>
 
-            <div style={styles.feature}>
-              <div style={styles.featureIcon}>
+            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
+              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
                 <Users size={18} />
               </div>
               <span>Faculty & Student Portals</span>
             </div>
 
-            <div style={styles.feature}>
-              <div style={styles.featureIcon}>
+            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
+              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
                 <ShieldCheck size={18} />
               </div>
               <span>Secure Role-Based Access</span>
@@ -165,39 +182,39 @@ function Login() {
         </div>
 
         {/* Login Panel */}
-        <div style={styles.loginPanel}>
-          <div style={styles.mobileLogo}>
-            <div style={styles.mobileLogoIcon}>
+        <div className="flex flex-col justify-center bg-card px-[55px] py-[45px]">
+          <div className="hidden">
+            <div className="flex size-11 items-center justify-center rounded-[14px] bg-primary text-primary-foreground">
               <GraduationCap size={25} />
             </div>
 
             <div>
-              <div style={styles.mobileLogoTitle}>
+              <div className="text-base font-semibold text-foreground">
                 SmartSchedAI
               </div>
-              <div style={styles.mobileLogoSubtitle}>
+              <div className="text-xs text-muted-foreground">
                 Smart Scheduling Platform
               </div>
             </div>
           </div>
 
-          <div style={styles.loginHeader}>
-            <h2 style={styles.loginTitle}>
+          <div className="mb-7">
+            <h2 className="m-0 text-[30px] font-bold tracking-[-0.6px] text-foreground">
               Welcome back
             </h2>
 
-            <p style={styles.loginSubtitle}>
+            <p className="mt-[7px] mb-0 text-[15px] text-muted-foreground">
               Sign in to access your portal
             </p>
           </div>
 
           {/* Role Selection */}
-          <div style={styles.roleSection}>
-            <label style={styles.label}>
+          <div className="mb-[22px]">
+            <label className="mb-2 block text-[13px] font-semibold text-foreground">
               Select Portal
             </label>
 
-            <div style={styles.roleGrid}>
+            <div className="grid grid-cols-3 gap-2">
               {roles.map((item) => {
                 const Icon = item.icon;
                 const active = role === item.id;
@@ -210,12 +227,12 @@ function Login() {
                       setRole(item.id);
                       setError("");
                     }}
-                    style={{
-                      ...styles.roleButton,
-                      ...(active
-                        ? styles.roleButtonActive
-                        : {}),
-                    }}
+                    className={cn(
+                      "flex h-12 cursor-pointer items-center justify-center gap-[7px] rounded-[10px] border border-border bg-muted text-[13px] font-semibold text-muted-foreground transition-colors duration-200",
+                      active
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "hover:bg-accent hover:text-foreground"
+                    )}
                   >
                     <Icon
                       size={18}
@@ -230,7 +247,7 @@ function Login() {
           </div>
 
           {error && (
-            <div style={styles.errorBox}>
+            <div className="mb-[18px] flex items-center gap-[9px] rounded-[10px] border border-destructive/30 bg-destructive/10 px-[13px] py-[11px] text-[13px] text-destructive">
               <AlertCircle size={18} />
 
               <span>{error}</span>
@@ -239,15 +256,15 @@ function Login() {
 
           <form onSubmit={handleLogin}>
             {/* Email */}
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>
+            <div className="mb-[19px]">
+              <label className="mb-2 block text-[13px] font-semibold text-foreground">
                 Email Address
               </label>
 
-              <div style={styles.inputWrapper}>
+              <div className="relative w-full">
                 <Mail
                   size={19}
-                  style={styles.inputIcon}
+                  className="pointer-events-none absolute top-1/2 left-[15px] -translate-y-1/2 text-muted-foreground"
                 />
 
                 <input
@@ -261,22 +278,22 @@ function Login() {
                       ? "Enter your university email"
                       : "Enter your email address"
                   }
-                  style={styles.input}
+                  className={cn(INPUT_CLASS, "pr-[15px]")}
                   autoComplete="email"
                 />
               </div>
             </div>
 
             {/* Password */}
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>
+            <div className="mb-[19px]">
+              <label className="mb-2 block text-[13px] font-semibold text-foreground">
                 Password
               </label>
 
-              <div style={styles.inputWrapper}>
+              <div className="relative w-full">
                 <Lock
                   size={19}
-                  style={styles.inputIcon}
+                  className="pointer-events-none absolute top-1/2 left-[15px] -translate-y-1/2 text-muted-foreground"
                 />
 
                 <input
@@ -290,10 +307,7 @@ function Login() {
                     setPassword(e.target.value)
                   }
                   placeholder="Enter your password"
-                  style={{
-                    ...styles.input,
-                    paddingRight: "50px",
-                  }}
+                  className={cn(INPUT_CLASS, "pr-[50px]")}
                   autoComplete="current-password"
                 />
 
@@ -302,7 +316,7 @@ function Login() {
                   onClick={() =>
                     setShowPassword(!showPassword)
                   }
-                  style={styles.passwordButton}
+                  className="absolute top-1/2 right-[13px] flex -translate-y-1/2 cursor-pointer items-center border-0 bg-transparent p-1 text-muted-foreground transition-colors hover:text-foreground"
                   aria-label={
                     showPassword
                       ? "Hide password"
@@ -319,18 +333,18 @@ function Login() {
             </div>
 
             {/* Options */}
-            <div style={styles.options}>
-              <label style={styles.remember}>
+            <div className="mb-[23px] flex items-center justify-between text-xs">
+              <label className="flex cursor-pointer items-center gap-[7px] text-muted-foreground">
                 <input
                   type="checkbox"
-                  style={styles.checkbox}
+                  className="size-[14px] cursor-pointer accent-primary"
                 />
                 <span>Remember me</span>
               </label>
 
               <button
                 type="button"
-                style={styles.forgotButton}
+                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-primary transition-colors hover:text-primary/80"
                 onClick={() =>
                   setError(
                     "Please contact your administrator to reset your password."
@@ -345,12 +359,12 @@ function Login() {
             <button
               type="submit"
               disabled={loading}
-              style={{
-                ...styles.loginButton,
-                ...(loading
-                  ? styles.loginButtonDisabled
-                  : {}),
-              }}
+              className={cn(
+                "flex h-[52px] w-full items-center justify-center gap-[9px] rounded-[10px] border-0 bg-primary text-[15px] font-semibold text-primary-foreground shadow-sm transition-colors duration-200",
+                loading
+                  ? "cursor-not-allowed opacity-65 shadow-none"
+                  : "cursor-pointer hover:bg-primary/90"
+              )}
             >
               <span>
                 {loading
@@ -367,14 +381,14 @@ function Login() {
             </button>
           </form>
 
-          <div style={styles.security}>
+          <div className="mt-[22px] flex items-center justify-center gap-[7px] text-[11px] text-muted-foreground">
             <ShieldCheck size={16} />
             <span>
               Secure access to SmartSchedAI
             </span>
           </div>
 
-          <div style={styles.footer}>
+          <div className="mt-[18px] text-center text-[10px] text-muted-foreground">
             SmartSchedAI • Smart Classroom & Timetable
             Scheduler
           </div>
@@ -383,369 +397,5 @@ function Login() {
     </div>
   );
 }
-
-/* =====================================================
-   STYLES
-===================================================== */
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    width: "100%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background:
-      "linear-gradient(135deg, #0f1235 0%, #17184a 45%, #24104d 100%)",
-    position: "relative",
-    overflow: "hidden",
-    fontFamily:
-      "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "30px",
-    boxSizing: "border-box",
-  },
-
-  glowOne: {
-    position: "absolute",
-    width: "500px",
-    height: "500px",
-    borderRadius: "50%",
-    background:
-      "rgba(37, 99, 235, 0.18)",
-    filter: "blur(100px)",
-    top: "-220px",
-    left: "-180px",
-    pointerEvents: "none",
-  },
-
-  glowTwo: {
-    position: "absolute",
-    width: "550px",
-    height: "550px",
-    borderRadius: "50%",
-    background:
-      "rgba(124, 58, 237, 0.18)",
-    filter: "blur(110px)",
-    bottom: "-250px",
-    right: "-180px",
-    pointerEvents: "none",
-  },
-
-  loginWrapper: {
-    width: "100%",
-    maxWidth: "1050px",
-    minHeight: "650px",
-    display: "grid",
-    gridTemplateColumns: "0.95fr 1.05fr",
-    borderRadius: "24px",
-    overflow: "hidden",
-    background: "rgba(255,255,255,0.97)",
-    boxShadow:
-      "0 30px 80px rgba(0,0,0,0.35)",
-    position: "relative",
-    zIndex: 2,
-  },
-
-  brandPanel: {
-    background:
-      "linear-gradient(145deg, #151942 0%, #20205a 55%, #35146a 100%)",
-    padding: "55px 48px",
-    color: "white",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-  },
-
-  brandIcon: {
-    width: "64px",
-    height: "64px",
-    borderRadius: "18px",
-    background:
-      "linear-gradient(135deg, #0ea5e9, #2563eb)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow:
-      "0 12px 30px rgba(37,99,235,0.35)",
-    marginBottom: "25px",
-  },
-
-  brandTitle: {
-    margin: 0,
-    fontSize: "38px",
-    fontWeight: 800,
-    letterSpacing: "-1.2px",
-  },
-
-  brandAccent: {
-    color: "#38bdf8",
-  },
-
-  brandSubtitle: {
-    fontSize: "18px",
-    lineHeight: 1.55,
-    color: "#c4c9e8",
-    marginTop: "12px",
-    marginBottom: "25px",
-  },
-
-  brandDivider: {
-    width: "55px",
-    height: "3px",
-    background:
-      "linear-gradient(90deg, #38bdf8, #8b5cf6)",
-    borderRadius: "10px",
-    marginBottom: "25px",
-  },
-
-  brandDescription: {
-    fontSize: "14px",
-    lineHeight: 1.7,
-    color: "#aeb5d5",
-    maxWidth: "390px",
-    margin: 0,
-  },
-
-  features: {
-    marginTop: "35px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "15px",
-  },
-
-  feature: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    color: "#d7dbf0",
-    fontSize: "14px",
-  },
-
-  featureIcon: {
-    width: "34px",
-    height: "34px",
-    borderRadius: "10px",
-    background: "rgba(56,189,248,0.12)",
-    border:
-      "1px solid rgba(56,189,248,0.18)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#38bdf8",
-    flexShrink: 0,
-  },
-
-  loginPanel: {
-    padding: "45px 55px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    background: "#ffffff",
-  },
-
-  mobileLogo: {
-    display: "none",
-  },
-
-  loginHeader: {
-    marginBottom: "28px",
-  },
-
-  loginTitle: {
-    margin: 0,
-    color: "#171a3a",
-    fontSize: "30px",
-    fontWeight: 750,
-    letterSpacing: "-0.6px",
-  },
-
-  loginSubtitle: {
-    margin: "7px 0 0",
-    color: "#737891",
-    fontSize: "15px",
-  },
-
-  roleSection: {
-    marginBottom: "22px",
-  },
-
-  label: {
-    display: "block",
-    color: "#292d4d",
-    fontSize: "13px",
-    fontWeight: 650,
-    marginBottom: "8px",
-  },
-
-  roleGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(3, 1fr)",
-    gap: "8px",
-  },
-
-  roleButton: {
-    height: "48px",
-    borderRadius: "10px",
-    border: "1px solid #e1e4ee",
-    background: "#f8f9fc",
-    color: "#656b82",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "7px",
-    fontSize: "13px",
-    fontWeight: 600,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-  },
-
-  roleButtonActive: {
-    background:
-      "linear-gradient(135deg, #eef5ff, #f2edff)",
-    border:
-      "1px solid #7c8ff5",
-    color: "#3157d5",
-    boxShadow:
-      "0 4px 12px rgba(49,87,213,0.10)",
-  },
-
-  errorBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: "9px",
-    padding: "11px 13px",
-    marginBottom: "18px",
-    borderRadius: "10px",
-    background: "#fff1f2",
-    border: "1px solid #fecdd3",
-    color: "#be123c",
-    fontSize: "13px",
-  },
-
-  inputGroup: {
-    marginBottom: "19px",
-  },
-
-  inputWrapper: {
-    position: "relative",
-    width: "100%",
-  },
-
-  inputIcon: {
-    position: "absolute",
-    left: "15px",
-    top: "50%",
-    transform: "translateY(-50%)",
-    color: "#8990a8",
-    pointerEvents: "none",
-  },
-
-  input: {
-    width: "100%",
-    height: "50px",
-    boxSizing: "border-box",
-    border:
-      "1px solid #dfe3ed",
-    borderRadius: "10px",
-    padding:
-      "0 15px 0 45px",
-    outline: "none",
-    background: "#fafbfe",
-    color: "#20243d",
-    fontSize: "14px",
-    transition: "all 0.2s ease",
-  },
-
-  passwordButton: {
-    position: "absolute",
-    right: "13px",
-    top: "50%",
-    transform: "translateY(-50%)",
-    border: "none",
-    background: "transparent",
-    color: "#858ba3",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    padding: "4px",
-  },
-
-  options: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "23px",
-    fontSize: "12px",
-  },
-
-  remember: {
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    color: "#6c7289",
-    cursor: "pointer",
-  },
-
-  checkbox: {
-    width: "14px",
-    height: "14px",
-    accentColor: "#4f67e8",
-    cursor: "pointer",
-  },
-
-  forgotButton: {
-    border: "none",
-    background: "transparent",
-    color: "#4161dc",
-    fontWeight: 600,
-    cursor: "pointer",
-    fontSize: "12px",
-    padding: 0,
-  },
-
-  loginButton: {
-    width: "100%",
-    height: "52px",
-    border: "none",
-    borderRadius: "10px",
-    background:
-      "linear-gradient(135deg, #2563eb, #4f46e5)",
-    color: "white",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "9px",
-    fontSize: "15px",
-    fontWeight: 650,
-    cursor: "pointer",
-    boxShadow:
-      "0 10px 25px rgba(59,78,220,0.25)",
-    transition: "all 0.2s ease",
-  },
-
-  loginButtonDisabled: {
-    opacity: 0.65,
-    cursor: "not-allowed",
-    boxShadow: "none",
-  },
-
-  security: {
-    marginTop: "22px",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: "7px",
-    color: "#8a90a6",
-    fontSize: "11px",
-  },
-
-  footer: {
-    marginTop: "18px",
-    textAlign: "center",
-    color: "#a0a5b7",
-    fontSize: "10px",
-  },
-};
 
 export default Login;

@@ -1,8 +1,28 @@
-import React, { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  CalendarDays,
+  CalendarOff,
+  LayoutDashboard,
+  LayoutGrid,
+  List,
+  UserX,
+} from "lucide-react";
 
+import { navForRole } from "@/lib/nav";
 import useIdentity from "@/hooks/useIdentity";
+import { useSystemConfig } from "@/hooks/useSystemConfig";
 import { useTimetableData } from "@/hooks/useTimetableData";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
+import { SectionCard } from "@/components/common/SectionCard";
+import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /* ============================================================
    COHORT SCOPING
@@ -217,454 +237,78 @@ function uniqueEntries(schedule) {
   return result;
 }
 
-/* =========================================================
-   STYLES
-========================================================= */
+/* ============================================================
+   GRID RECONCILIATION
+   ------------------------------------------------------------
+   `<TimetableGrid>` can only draw an entry in a cell that exists:
+   Matrix does `index.get(day)?.get(row.start)`, so an entry is
+   rendered only when its `day` is one of `grid.days` AND its
+   `startTime` is exactly the `start` of one of `grid.slots`.
+   Everything else — an entry left over from a previous period
+   layout after an admin edits /infrastructure, an entry on a day
+   the institution no longer works, an entry that starts inside a
+   break — is dropped by the grid with no message, which used to
+   show this page a week of "Free" cells while `entries.length > 0`
+   (so the EmptyState branch never fired either).
 
-const styles = {
-  app: {
-    minHeight: "100vh",
-    display: "flex",
-    background:
-      "linear-gradient(135deg,#151943 0%,#24165c 45%,#5a168d 100%)",
-    color: "#fff",
-    fontFamily:
-      "Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-  },
+   So the entries are reconciled against the live grid BEFORE
+   rendering: whatever the grid cannot place is named in a Callout
+   and listed in a `<TimetableListView>` underneath it, and the
+   Grid/List toggle (same as pages/FacultyTimetable.jsx) always
+   offers a view that shows every entry regardless of alignment.
 
-  sidebar: {
-    width: 255,
-    minWidth: 255,
-    minHeight: "100vh",
-    background: "rgba(12,17,54,.94)",
-    borderRight:
-      "1px solid rgba(255,255,255,.08)",
-    padding: 24,
-    boxSizing: "border-box",
-    display: "flex",
-    flexDirection: "column",
-    position: "sticky",
-    top: 0,
-    height: "100vh",
-  },
+   The same helper exists in pages/FacultyTimetable.jsx, which has
+   the identical grid behaviour. Change one copy, change the other.
+   The predicate below must keep mirroring
+   `lib/schedule.js#groupByDay` (case-insensitive day match) and
+   `TimetableGrid#indexByDayAndSlot` (exact `startTime` string).
+============================================================ */
 
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 48,
-  },
+function partitionAgainstGrid(entries, grid) {
+  const list = Array.isArray(entries) ? entries : [];
 
-  logo: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    background:
-      "linear-gradient(135deg,#0ea5e9,#2563eb)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 22,
-  },
+  const days = (grid?.days || []).map((day) => String(day).toLowerCase());
+  const starts = new Set((grid?.slots || []).map((slot) => String(slot.start)));
 
-  brandName: {
-    fontSize: 18,
-    fontWeight: 800,
-  },
+  // Without a usable grid there is nothing to reconcile against; treat
+  // every entry as placeable rather than reporting the whole week as
+  // off-grid while the config is still loading.
+  if (days.length === 0 || starts.size === 0) {
+    return { onGrid: list, offGrid: [] };
+  }
 
-  brandSub: {
-    fontSize: 12,
-    color: "#9ca3c7",
-    marginTop: 3,
-  },
+  const onGrid = [];
+  const offGrid = [];
 
-  nav: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  },
+  list.forEach((entry) => {
+    const day = String(entry?.day || "").toLowerCase();
+    const start = String(entry?.startTime || "");
 
-  navItem: {
-    width: "100%",
-    minHeight: 48,
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
-    padding: "0 16px",
-    border: 0,
-    borderRadius: 12,
-    background: "transparent",
-    color: "#c7cbe3",
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: "pointer",
-    textAlign: "left",
-  },
+    if (days.includes(day) && starts.has(start)) {
+      onGrid.push(entry);
+    } else {
+      offGrid.push(entry);
+    }
+  });
 
-  active: {
-    background:
-      "linear-gradient(90deg,rgba(37,99,235,.45),rgba(37,99,235,.25))",
-    color: "#fff",
-    boxShadow:
-      "inset 0 0 0 1px rgba(96,165,250,.35)",
-  },
+  return { onGrid, offGrid };
+}
 
-  bottom: {
-    marginTop: "auto",
-  },
+/* ============================================================
+   /student-portal/timetable
+   ------------------------------------------------------------
+   The old hand-rolled row list is gone: the week is rendered by
+   the shared <TimetableGrid> in `byBatch` mode, over the grid
+   `useSystemConfig()` derives from GET /api/config/grid, so days,
+   periods and breaks follow the institution's configuration
+   rather than a copy of DAYS/TIME_SLOTS in this file.
 
-  main: {
-    flex: 1,
-    padding: "38px 32px 60px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 20,
-    marginBottom: 28,
-  },
-
-  title: {
-    margin: 0,
-    fontSize: 42,
-    fontWeight: 800,
-    letterSpacing: "-1px",
-  },
-
-  subtitle: {
-    margin: "10px 0 0",
-    color: "#c7cbe3",
-    fontSize: 16,
-  },
-
-  button: {
-    border:
-      "1px solid rgba(139,92,246,.45)",
-    background:
-      "rgba(91,61,155,.35)",
-    color: "#ddd6fe",
-    borderRadius: 10,
-    padding: "10px 15px",
-    fontWeight: 650,
-    cursor: "pointer",
-  },
-
-  card: {
-    borderRadius: 18,
-    background:
-      "linear-gradient(145deg,rgba(62,37,123,.86),rgba(64,30,116,.86))",
-    border:
-      "1px solid rgba(139,92,246,.3)",
-    overflow: "hidden",
-    marginBottom: 22,
-  },
-
-  cardHead: {
-    padding: "22px 24px",
-    borderBottom:
-      "1px solid rgba(255,255,255,.08)",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-  },
-
-  cardTitle: {
-    margin: 0,
-    fontSize: 21,
-    fontWeight: 750,
-  },
-
-  muted: {
-    color: "#aaa4c9",
-    fontSize: 14,
-  },
-
-  badge: {
-    display: "inline-block",
-    padding: "5px 10px",
-    borderRadius: 999,
-    background:
-      "rgba(37,99,235,.2)",
-    color: "#93c5fd",
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: "uppercase",
-  },
-
-  timetableContainer: {
-    padding: 20,
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-  },
-
-  timetableRow: {
-    display: "grid",
-    gridTemplateColumns:
-      "150px 180px minmax(250px,1fr) minmax(220px,1fr) 150px",
-    alignItems: "stretch",
-    background:
-      "linear-gradient(135deg,rgba(91,61,155,.58),rgba(72,43,140,.58))",
-    border:
-      "1px solid rgba(167,139,250,.20)",
-    borderRadius: 14,
-    overflow: "hidden",
-    minHeight: 92,
-    boxShadow:
-      "0 5px 18px rgba(0,0,0,.12)",
-    transition:
-      "transform .15s ease, border-color .15s ease",
-  },
-
-  dayBox: {
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    borderRight:
-      "1px solid rgba(255,255,255,.08)",
-  },
-
-  dayLabel: {
-    color: "#a99bd4",
-    fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: 700,
-    marginBottom: 6,
-  },
-
-  dayValue: {
-    fontSize: 16,
-    fontWeight: 800,
-  },
-
-  timeBox: {
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    borderRight:
-      "1px solid rgba(255,255,255,.08)",
-  },
-
-  timeLabel: {
-    color: "#a99bd4",
-    fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: 700,
-    marginBottom: 6,
-  },
-
-  timeValue: {
-    fontSize: 15,
-    fontWeight: 750,
-    color: "#fff",
-  },
-
-  courseBox: {
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    borderRight:
-      "1px solid rgba(255,255,255,.08)",
-  },
-
-  courseLabel: {
-    color: "#a99bd4",
-    fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: 700,
-    marginBottom: 6,
-  },
-
-  courseName: {
-    fontSize: 15,
-    fontWeight: 800,
-    color: "#fff",
-  },
-
-  courseCode: {
-    fontSize: 12,
-    color: "#b7a9dc",
-    marginTop: 4,
-  },
-
-  facultyBox: {
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    borderRight:
-      "1px solid rgba(255,255,255,.08)",
-  },
-
-  facultyLabel: {
-    color: "#a99bd4",
-    fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: 700,
-    marginBottom: 6,
-  },
-
-  facultyName: {
-    fontSize: 14,
-    fontWeight: 750,
-    color: "#fff",
-  },
-
-  roomBox: {
-    padding: "18px 20px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-  },
-
-  roomLabel: {
-    color: "#a99bd4",
-    fontSize: 10,
-    textTransform: "uppercase",
-    fontWeight: 700,
-    marginBottom: 6,
-  },
-
-  roomName: {
-    fontSize: 15,
-    fontWeight: 800,
-    color: "#fff",
-  },
-
-  empty: {
-    padding: 50,
-    textAlign: "center",
-    color: "#aaa4c9",
-  },
-
-  error: {
-    padding: 14,
-    marginBottom: 18,
-    borderRadius: 12,
-    background:
-      "rgba(239,68,68,.15)",
-    border:
-      "1px solid rgba(239,68,68,.4)",
-    color: "#fecaca",
-  },
-
-  loading: {
-    minHeight: "100vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "#151943",
-    color: "#fff",
-    fontSize: 18,
-  },
-};
-
-/* =========================================================
-   SIDEBAR
-========================================================= */
-
-const Nav = ({ active, navigate }) => {
-  const items = [
-    ["Dashboard", "/student-portal", "▦"],
-    ["My Timetable", "/student-portal/timetable", "▣"],
-    ["My Courses", "/student-portal/courses", "▤"],
-    ["Notifications", "/student-portal/notifications", "♧"],
-    ["My Profile", "/student-portal/profile", "♙"],
-  ];
-
-  return (
-    <aside style={styles.sidebar}>
-      <div style={styles.brand}>
-        <div style={styles.logo}>🎓</div>
-
-        <div>
-          <div style={styles.brandName}>
-            Smart Scheduler
-          </div>
-
-          <div style={styles.brandSub}>
-            Student Portal
-          </div>
-        </div>
-      </div>
-
-      <nav style={styles.nav}>
-        {items.map(([label, path, icon]) => (
-          <button
-            key={path}
-            style={{
-              ...styles.navItem,
-              ...(active === path
-                ? styles.active
-                : {}),
-            }}
-            onClick={() => navigate(path)}
-          >
-            <span
-              style={{
-                fontSize: 19,
-                width: 20,
-              }}
-            >
-              {icon}
-            </span>
-
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
-
-      <div style={styles.bottom}>
-        <button
-          style={styles.navItem}
-          onClick={() => {
-            localStorage.removeItem("token");
-            localStorage.removeItem("user");
-            navigate("/login");
-          }}
-        >
-          ↪
-          <span>Logout</span>
-        </button>
-      </div>
-    </aside>
-  );
-};
-
-/* =========================================================
-   PAGE LAYOUT
-========================================================= */
-
-const Page = ({
-  active,
-  navigate,
-  children,
-}) => {
-  return (
-    <div style={styles.app}>
-      <Nav
-        active={active}
-        navigate={navigate}
-      />
-
-      <main style={styles.main}>
-        {children}
-      </main>
-    </div>
-  );
-};
-
-/* =========================================================
-   MY TIMETABLE
-========================================================= */
+   No `groupValue` is passed on purpose. The selected timetable is
+   already this student's own cohort; letting the grid label the
+   batch it finds keeps every entry on screen, where a client-side
+   batch filter could silently drop rows whose course reference
+   failed to resolve.
+============================================================ */
 
 function MyTimetable() {
   const navigate = useNavigate();
@@ -684,12 +328,14 @@ function MyTimetable() {
   // same hook, so the two pages cannot disagree about this student.
   const {
     timetables,
-    courses,
-    faculty,
-    rooms,
+    maps,
     loading: dataLoading,
     error: dataError,
   } = useTimetableData(filters);
+
+  const { grid } = useSystemConfig();
+
+  const { brand, nav } = navForRole(user?.role || "student");
 
   /* -------------------------------------------------------
      NO SESSION → LOGIN
@@ -710,75 +356,17 @@ function MyTimetable() {
     [timetables, user]
   );
 
-  /* -------------------------------------------------------
-     LOOKUP FUNCTIONS
-  ------------------------------------------------------- */
+  const entries = useMemo(() => uniqueEntries(selected?.schedule), [selected]);
 
-  const courseById = (id) => {
-    return courses.find(
-      (course) =>
-        getId(
-          course._id || course.id
-        ) === getId(id)
-    );
-  };
+  // Grid ↔ List. Purely a display choice; it changes nothing about which
+  // entries this student is allowed to see.
+  const [display, setDisplay] = useState("grid");
 
-  const roomById = (id) => {
-    return rooms.find(
-      (room) =>
-        getId(
-          room._id || room.id
-        ) === getId(id)
-    );
-  };
-
-  const facultyById = (id) => {
-    return faculty.find(
-      (member) =>
-        getId(
-          member._id || member.id
-        ) === getId(id)
-    );
-  };
-
-  /* -------------------------------------------------------
-     SORT SCHEDULE
-  ------------------------------------------------------- */
-
-  const entries = useMemo(() => {
-    const dayOrder = {
-      Monday: 1,
-      Tuesday: 2,
-      Wednesday: 3,
-      Thursday: 4,
-      Friday: 5,
-      Saturday: 6,
-      Sunday: 7,
-    };
-
-    return uniqueEntries(selected?.schedule)
-      .map((entry, index) => ({
-        ...entry,
-        _index: index,
-      }))
-      .sort((a, b) => {
-        const dayDifference =
-          (dayOrder[normalizeDay(a.day)] || 99) -
-          (dayOrder[normalizeDay(b.day)] || 99);
-
-        if (dayDifference !== 0) {
-          return dayDifference;
-        }
-
-        return String(
-          a.startTime || ""
-        ).localeCompare(
-          String(
-            b.startTime || ""
-          )
-        );
-      });
-  }, [selected]);
+  // What the grid can actually draw, and what it would silently swallow.
+  const { offGrid } = useMemo(
+    () => partitionAgainstGrid(entries, grid),
+    [entries, grid]
+  );
 
   /* -------------------------------------------------------
      PROFILE VALUES — no invented defaults
@@ -807,317 +395,140 @@ function MyTimetable() {
       ? "Your student profile has no department set — contact your administrator"
       : "No published timetable for your department and semester yet.";
 
-  /* -------------------------------------------------------
-     LOADING
-  ------------------------------------------------------- */
-
-  if (identityLoading || dataLoading) {
-    return (
-      <div style={styles.loading}>
-        Loading timetable...
-      </div>
-    );
-  }
+  const loading = identityLoading || dataLoading;
 
   /* -------------------------------------------------------
      PAGE
   ------------------------------------------------------- */
 
   return (
-    <Page
-      active="/student-portal/timetable"
-      navigate={navigate}
-    >
-      {/* HEADER */}
+    <AppShell brand={brand} nav={nav} chatbot={{ context: { page: "my-timetable" } }}>
+      <PageHeader
+        title="My Timetable"
+        description="Your generated weekly class schedule."
+        actions={
+          <>
+            {/* Same Grid/List toggle as pages/FacultyTimetable.jsx: the list
+                renders every entry, aligned with the grid or not. */}
+            <Tabs value={display} onValueChange={setDisplay}>
+              <TabsList variant="pill">
+                <TabsTrigger value="grid">
+                  <LayoutGrid /> Grid
+                </TabsTrigger>
+                <TabsTrigger value="list">
+                  <List /> List
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-      <div style={styles.header}>
-        <div>
-          <h1 style={styles.title}>
-            My Timetable
-          </h1>
+            <Button variant="outline" onClick={() => navigate("/student-portal")}>
+              <LayoutDashboard className="size-4" />
+              Dashboard
+            </Button>
+          </>
+        }
+      />
 
-          <p style={styles.subtitle}>
-            Your generated weekly class schedule
-          </p>
-        </div>
+      <div className="space-y-6">
+        {errorMessage && (
+          <Callout tone="destructive" title="Could not load your timetable">
+            {errorMessage}
+          </Callout>
+        )}
 
-        <button
-          style={styles.button}
-          onClick={() =>
-            navigate(
-              "/student-portal"
-            )
-          }
-        >
-          Dashboard →
-        </button>
-      </div>
-
-      {/* ERROR */}
-
-      {errorMessage && (
-        <div style={styles.error}>
-          {errorMessage}
-        </div>
-      )}
-
-      {/* UNLINKED PROFILE — no data is shown at all */}
-
-      {!linked ? (
-        <div style={styles.card}>
-          <div style={styles.cardHead}>
-            <div>
-              <h2 style={styles.cardTitle}>
-                Profile not linked
-              </h2>
-
-              <p style={styles.muted}>
-                Your account is not connected to a student record
-              </p>
+        {loading ? (
+          <SectionCard title="My Timetable" description="Loading your schedule…">
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
             </div>
-          </div>
+          </SectionCard>
+        ) : !linked ? (
+          /* UNLINKED PROFILE — no data is shown at all */
+          <SectionCard
+            title="Profile not linked"
+            description="Your account is not connected to a student record."
+            icon={UserX}
+          >
+            <EmptyState
+              icon={UserX}
+              title="Profile not linked — contact your administrator"
+              description="Until your account is linked to a student record there is no cohort to show a timetable for."
+            />
+          </SectionCard>
+        ) : (
+          <SectionCard
+            title={selected?.name || "My Timetable"}
+            description={`${studentDepartment} · Semester ${studentSemester} · ${studentAcademicYear}`}
+            icon={CalendarDays}
+            actions={
+              selected ? (
+                <Badge variant="secondary" className="capitalize">
+                  {selected.status}
+                </Badge>
+              ) : null
+            }
+          >
+            {entries.length > 0 ? (
+              display === "list" ? (
+                <TimetableListView
+                  schedule={entries}
+                  grid={grid}
+                  maps={maps}
+                  groupBy="day"
+                  colorMode="type"
+                />
+              ) : (
+                <div className="space-y-4">
+                  <TimetableGrid
+                    schedule={entries}
+                    grid={grid}
+                    maps={maps}
+                    viewMode="byBatch"
+                    colorMode="type"
+                    title={selected?.name || "My Timetable"}
+                    subtitle={`${studentDepartment} · Semester ${studentSemester} · ${studentAcademicYear}`}
+                  />
 
-          <div style={styles.empty}>
-            Profile not linked — contact your administrator
-          </div>
-        </div>
-      ) : (
-        /* TIMETABLE CARD */
-
-        <div style={styles.card}>
-          {/* CARD HEADER */}
-
-          <div style={styles.cardHead}>
-            <div>
-              <h2 style={styles.cardTitle}>
-                {selected?.name ||
-                  "My Timetable"}
-              </h2>
-
-              <p style={styles.muted}>
-                {studentDepartment} · Semester{" "}
-                {studentSemester} ·{" "}
-                {studentAcademicYear}
-              </p>
-            </div>
-
-            {selected && (
-              <span style={styles.badge}>
-                {selected.status}
-              </span>
-            )}
-          </div>
-
-          {/* RECTANGULAR TIMETABLE */}
-
-          {entries.length > 0 ? (
-            <div
-              style={
-                styles.timetableContainer
-              }
-            >
-              {entries.map(
-                (entry, index) => {
-                  const course =
-                    courseById(
-                      entry.courseId ||
-                        entry.course
-                    );
-
-                  const room =
-                    roomById(
-                      entry.roomId ||
-                        entry.room
-                    );
-
-                  const member =
-                    facultyById(
-                      entry.facultyId ||
-                        entry.faculty
-                    );
-
-                  const courseName =
-                    course?.name ||
-                    course?.title ||
-                    entry.courseName ||
-                    "Course";
-
-                  const courseCode =
-                    course?.code ||
-                    entry.courseCode ||
-                    "—";
-
-                  const facultyName =
-                    member?.name ||
-                    member?.fullName ||
-                    member?.facultyName ||
-                    entry.facultyName ||
-                    entry.faculty?.name ||
-                    "—";
-
-                  const roomName =
-                    room?.name ||
-                    room?.roomNumber ||
-                    room?.number ||
-                    entry.roomName ||
-                    "—";
-
-                  return (
-                    <div
-                      key={
-                        entry._id ||
-                        entry.id ||
-                        index
-                      }
-                      style={
-                        styles.timetableRow
-                      }
-                    >
-                      {/* DAY */}
-
-                      <div
-                        style={
-                          styles.dayBox
-                        }
+                  {/* Nothing disappears silently: whatever the grid could not
+                      place is named and then listed underneath it. */}
+                  {offGrid.length > 0 && (
+                    <div className="space-y-3">
+                      <Callout
+                        tone="warning"
+                        title={`${offGrid.length} ${
+                          offGrid.length === 1 ? "class falls" : "classes fall"
+                        } outside the current timetable grid`}
+                        icon={CalendarOff}
                       >
-                        <span
-                          style={
-                            styles.dayLabel
-                          }
-                        >
-                          DAY
-                        </span>
+                        Their day or start time no longer matches a period in
+                        the institution&apos;s scheduling grid, so the week
+                        above cannot show them. They are listed below.
+                      </Callout>
 
-                        <span
-                          style={
-                            styles.dayValue
-                          }
-                        >
-                          {entry.day ||
-                            "—"}
-                        </span>
-                      </div>
-
-                      {/* TIME */}
-
-                      <div
-                        style={
-                          styles.timeBox
-                        }
-                      >
-                        <span
-                          style={
-                            styles.timeLabel
-                          }
-                        >
-                          TIME
-                        </span>
-
-                        <span
-                          style={
-                            styles.timeValue
-                          }
-                        >
-                          {entry.startTime ||
-                            "—"}{" "}
-                          -{" "}
-                          {entry.endTime ||
-                            "—"}
-                        </span>
-                      </div>
-
-                      {/* COURSE */}
-
-                      <div
-                        style={
-                          styles.courseBox
-                        }
-                      >
-                        <span
-                          style={
-                            styles.courseLabel
-                          }
-                        >
-                          COURSE
-                        </span>
-
-                        <span
-                          style={
-                            styles.courseName
-                          }
-                        >
-                          {courseName}
-                        </span>
-
-                        <span
-                          style={
-                            styles.courseCode
-                          }
-                        >
-                          {courseCode}
-                        </span>
-                      </div>
-
-                      {/* FACULTY */}
-
-                      <div
-                        style={
-                          styles.facultyBox
-                        }
-                      >
-                        <span
-                          style={
-                            styles.facultyLabel
-                          }
-                        >
-                          FACULTY
-                        </span>
-
-                        <span
-                          style={
-                            styles.facultyName
-                          }
-                        >
-                          {facultyName}
-                        </span>
-                      </div>
-
-                      {/* ROOM */}
-
-                      <div
-                        style={
-                          styles.roomBox
-                        }
-                      >
-                        <span
-                          style={
-                            styles.roomLabel
-                          }
-                        >
-                          ROOM
-                        </span>
-
-                        <span
-                          style={
-                            styles.roomName
-                          }
-                        >
-                          {roomName}
-                        </span>
-                      </div>
+                      <TimetableListView
+                        schedule={offGrid}
+                        grid={grid}
+                        maps={maps}
+                        groupBy="day"
+                        colorMode="type"
+                      />
                     </div>
-                  );
-                }
-              )}
-            </div>
-          ) : (
-            <div style={styles.empty}>
-              {emptyReason}
-            </div>
-          )}
-        </div>
-      )}
-    </Page>
+                  )}
+                </div>
+              )
+            ) : (
+              <EmptyState
+                icon={CalendarDays}
+                title="Nothing scheduled yet"
+                description={emptyReason}
+              />
+            )}
+          </SectionCard>
+        )}
+      </div>
+    </AppShell>
   );
 }
 

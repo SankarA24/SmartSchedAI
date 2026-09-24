@@ -1,30 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
-
+import { useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Calendar,
-  BookOpen,
-  Bell,
-  User,
-  LogOut,
-  GraduationCap,
-  Mail,
-  Building2,
+  AlertCircle,
   BriefcaseBusiness,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
   Clock,
+  GraduationCap,
+  Loader2,
+  Mail,
   Pencil,
   Save,
+  ShieldAlert,
+  User,
   X,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
 } from "lucide-react";
 
-import { Link, useNavigate } from "react-router-dom";
-
+import api from "@/lib/api";
+import { navForRole } from "@/lib/nav";
+import { cn } from "@/lib/utils";
 import useIdentity from "@/hooks/useIdentity";
 import { useSystemConfig } from "@/hooks/useSystemConfig";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { Callout } from "@/components/common/Callout";
+import { SectionCard } from "@/components/common/SectionCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 
 // =========================================================
@@ -114,6 +116,27 @@ function buildAvailabilityDraft(availability, gridDays, gridSlots) {
   }
 
   return draft;
+}
+
+/** One read-only key/value tile. */
+function DetailTile({ icon: Icon, label, value, mono = false }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/40 p-4">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {Icon && <Icon className="size-4" />}
+        <span className="text-xs">{label}</span>
+      </div>
+
+      <p
+        className={cn(
+          "mt-1.5 text-sm font-medium text-foreground",
+          mono && "break-all font-mono text-xs"
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
 }
 
 export default function FacultyProfile() {
@@ -329,54 +352,41 @@ export default function FacultyProfile() {
     }
   }, [facultyId, draftAvailability, draftPreferred, draftAvoided]);
 
-  const navigationItems = [
-    {
-      id: "dashboard",
-      label: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/faculty-portal",
+  // ---------------------------------------------
+  // Shell — shared sidebar/header, fed by lib/nav.js.
+  // ---------------------------------------------
+
+  const { brand, nav } = navForRole("faculty");
+
+  const navItems = useMemo(
+    () =>
+      nav.map((item) =>
+        item.badgeKey === "unread"
+          ? { ...item, badge: unreadNotifications }
+          : item
+      ),
+    [nav, unreadNotifications]
+  );
+
+  const shellProps = {
+    brand,
+    nav: navItems,
+    onLogout: handleLogout,
+    header: {
+      notifications: unreadNotifications,
+      onNotificationsClick: () => navigate("/faculty-portal/notifications"),
     },
-    {
-      id: "timetable",
-      label: "My Timetable",
-      icon: Calendar,
-      path: "/faculty-portal/timetable",
-    },
-    {
-      id: "courses",
-      label: "My Courses",
-      icon: BookOpen,
-      path: "/faculty-portal/courses",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/faculty-portal/notifications",
-    },
-    {
-      id: "profile",
-      label: "My Profile",
-      icon: User,
-      path: "/faculty-portal/profile",
-    },
-  ];
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-
-        <div className="text-center">
-
-          <div className="w-12 h-12 rounded-full border-4 border-blue-400 border-t-transparent animate-spin mx-auto mb-4" />
-
-          <p className="text-slate-300">
-            Loading profile...
-          </p>
-
+      <AppShell {...shellProps}>
+        <div className="animate-in space-y-6 fade-in duration-150">
+          <div className="h-9 w-56 animate-pulse rounded-md bg-muted" />
+          <div className="h-40 animate-pulse rounded-xl bg-muted" />
+          <div className="h-72 animate-pulse rounded-xl bg-muted" />
         </div>
-
-      </div>
+      </AppShell>
     );
   }
 
@@ -384,759 +394,348 @@ export default function FacultyProfile() {
   // so there is no profile to show and none is invented.
   if (!linked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+      <AppShell {...shellProps}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <div className="max-w-md text-center">
+            <ShieldAlert className="mx-auto mb-4 size-10 text-muted-foreground" />
 
-        <div className="text-center max-w-md">
+            <h1 className="text-xl font-semibold text-foreground">
+              Profile not linked — contact your administrator
+            </h1>
 
-          <User className="w-16 h-16 text-amber-400 mx-auto mb-5" />
+            <p className="mt-2 text-sm text-muted-foreground">
+              This account is not linked to a faculty record, so there is no
+              profile to show for it.
+            </p>
 
-          <h1 className="text-2xl font-bold text-white mb-3">
-            Profile not linked — contact your administrator
-          </h1>
-
-          <p className="text-slate-400 mb-6">
-            This account is not linked to a faculty record, so there is no
-            profile to show for it.
-          </p>
-
-          <button
-            onClick={handleLogout}
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white"
-          >
-            Return to Login
-          </button>
-
+            <Button onClick={handleLogout} className="mt-6">
+              Return to Login
+            </Button>
+          </div>
         </div>
-
-      </div>
+      </AppShell>
     );
   }
 
+  const displayName = faculty?.name || user?.name || "—";
+
+  const specialization = faculty?.specialization?.length
+    ? faculty.specialization.join(", ")
+    : "Not specified";
+
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+    <AppShell
+      {...shellProps}
+      chatbot={{ context: { page: "faculty-profile" } }}
+    >
+      <PageHeader
+        title="My Profile"
+        description="Your faculty record, and the availability the scheduler plans around."
+      />
 
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
-
-      {/* SIDEBAR */}
-
-      <div className="w-64 bg-slate-800/30 backdrop-blur-xl border-r border-slate-700/50 shadow-2xl relative z-10">
-
-        <div className="p-6 space-y-8">
-
-          {/* Logo */}
-
-          <div className="flex items-center gap-3">
-
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg">
-
-              <GraduationCap className="w-6 h-6 text-white" />
-
+      <div className="space-y-6">
+        <SectionCard>
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+            <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <User className="size-7" />
             </div>
 
-            <div>
-
-              <h2 className="text-lg font-bold text-white">
-                Smart Scheduler
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-semibold text-foreground">
+                {displayName}
               </h2>
-
-              <p className="text-xs text-slate-400">
-                Faculty Portal
-              </p>
-
+              <p className="mt-1 text-sm text-muted-foreground">Faculty member</p>
             </div>
-
           </div>
 
-          {/* Navigation */}
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DetailTile icon={User} label="Full name" value={displayName} />
 
-          <nav className="space-y-2">
+            <DetailTile
+              icon={Mail}
+              label="Email"
+              value={faculty?.email || "Not specified"}
+            />
 
-            {navigationItems.map((item) => {
+            <DetailTile
+              icon={Building2}
+              label="Department"
+              value={faculty?.department || "Not specified"}
+            />
 
-              const Icon = item.icon;
-
-              const isActive = item.id === "profile";
-
-              return (
-                <Link
-                  key={item.id}
-                  to={item.path}
-                >
-
-                  <div
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                      isActive
-                        ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 text-white border border-blue-500/30"
-                        : "text-slate-300 hover:bg-slate-700/30 hover:text-white"
-                    }`}
-                  >
-
-                    <Icon
-                      className={`w-5 h-5 ${
-                        isActive
-                          ? "text-blue-400"
-                          : "text-slate-400"
-                      }`}
-                    />
-
-                    <span className="font-medium">
-                      {item.label}
-                    </span>
-
-                    {item.id === "notifications" &&
-                      unreadNotifications > 0 && (
-                        <span className="ml-auto inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
-                          {unreadNotifications}
-                        </span>
-                      )}
-
-                  </div>
-
-                </Link>
-              );
-            })}
-
-          </nav>
-
-          {/* Logout */}
-
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-red-500/10 hover:text-red-400 transition-all"
-          >
-
-            <LogOut className="w-5 h-5" />
-
-            <span className="font-medium">
-              Logout
-            </span>
-
-          </button>
-
-        </div>
-
-      </div>
-
-      {/* MAIN */}
-
-      <div className="flex-1 overflow-auto relative z-10">
-
-        <div className="p-8 space-y-8 max-w-7xl mx-auto">
-
-          {/* Header */}
-
-          <div className="flex justify-between items-center">
-
-            <div>
-
-              <h1 className="text-4xl lg:text-5xl font-bold text-white bg-gradient-to-r from-white via-blue-100 to-cyan-100 bg-clip-text text-transparent">
-                My Profile
-              </h1>
-
-              <p className="text-lg text-slate-300 mt-3">
-                Your academic and professional information
-              </p>
-
-            </div>
-
-            <div className="px-4 py-3 rounded-xl bg-slate-800/30 border border-slate-700/50">
-
-              <p className="text-xs text-slate-400">
-                Faculty
-              </p>
-
-              <p className="text-sm font-semibold text-white">
-                {faculty?.name || user?.name || "—"}
-              </p>
-
-            </div>
-
+            <DetailTile
+              icon={GraduationCap}
+              label="Specialization"
+              value={specialization}
+            />
           </div>
-
-          {/* Profile Card */}
-
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
-
-            <div className="p-8 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-cyan-500/10 border-b border-slate-700/50">
-
-              <div className="flex items-center gap-6">
-
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg">
-
-                  <User className="w-10 h-10 text-white" />
-
-                </div>
-
-                <div>
-
-                  <h2 className="text-2xl font-bold text-white">
-                    {faculty?.name || user?.name || "—"}
-                  </h2>
-
-                  <p className="text-slate-400 mt-1">
-                    Faculty Member
-                  </p>
-
-                </div>
-
-              </div>
-
-            </div>
-
-            <div className="p-8">
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                {/* Name */}
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <div className="flex items-center gap-4">
-
-                    <div className="p-3 rounded-xl bg-blue-500/20">
-
-                      <User className="w-5 h-5 text-blue-400" />
-
-                    </div>
-
-                    <div>
-
-                      <p className="text-xs text-slate-400">
-                        Full Name
-                      </p>
-
-                      <p className="text-white font-semibold mt-1">
-                        {faculty?.name || user?.name || "—"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-                {/* Email */}
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <div className="flex items-center gap-4">
-
-                    <div className="p-3 rounded-xl bg-cyan-500/20">
-
-                      <Mail className="w-5 h-5 text-cyan-400" />
-
-                    </div>
-
-                    <div className="min-w-0">
-
-                      <p className="text-xs text-slate-400">
-                        Email
-                      </p>
-
-                      <p className="text-white font-semibold mt-1 truncate">
-                        {faculty?.email || "Not specified"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-                {/* Department */}
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <div className="flex items-center gap-4">
-
-                    <div className="p-3 rounded-xl bg-emerald-500/20">
-
-                      <Building2 className="w-5 h-5 text-emerald-400" />
-
-                    </div>
-
-                    <div>
-
-                      <p className="text-xs text-slate-400">
-                        Department
-                      </p>
-
-                      <p className="text-white font-semibold mt-1">
-                        {faculty?.department || "Not specified"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-                {/* Specialization */}
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <div className="flex items-center gap-4">
-
-                    <div className="p-3 rounded-xl bg-violet-500/20">
-
-                      <GraduationCap className="w-5 h-5 text-violet-400" />
-
-                    </div>
-
-                    <div>
-
-                      <p className="text-xs text-slate-400">
-                        Specialization
-                      </p>
-
-                      <p className="text-white font-semibold mt-1">
-                        {faculty?.specialization?.length
-                          ? faculty?.specialization.join(", ")
-                          : "Not specified"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-            </div>
-
+        </SectionCard>
+
+        <SectionCard
+          title="Professional details"
+          description="Additional faculty information held on your record."
+          icon={BriefcaseBusiness}
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <DetailTile
+              icon={BriefcaseBusiness}
+              label="Faculty ID"
+              value={faculty?._id || facultyId || "—"}
+              mono
+            />
+
+            <DetailTile
+              icon={Building2}
+              label="Department"
+              value={faculty?.department || "Not specified"}
+            />
+
+            <DetailTile
+              icon={GraduationCap}
+              label="Specialization"
+              value={specialization}
+            />
           </div>
+        </SectionCard>
 
-          {/* Faculty Details */}
+        {/* ==================================================
+            AVAILABILITY  (editable)
 
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg">
+            The only fields a faculty member may change are availability
+            and preferences — `PUT /api/faculty/:id` keeps nothing else
+            off a faculty caller's body. Name, email and department stay
+            read-only above.
+        ================================================== */}
 
-            <div className="border-b border-slate-700/50 p-6">
-
-              <h2 className="text-xl font-semibold text-white">
-                Professional Details
-              </h2>
-
-              <p className="text-slate-400 mt-1">
-                Additional faculty information
-              </p>
-
-            </div>
-
-            <div className="p-6">
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <BriefcaseBusiness className="w-6 h-6 text-blue-400 mb-3" />
-
-                  <p className="text-xs text-slate-400">
-                    Faculty ID
-                  </p>
-
-                  <p className="text-white font-semibold mt-1 break-all">
-                    {faculty?._id || facultyId || "—"}
-                  </p>
-
-                </div>
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <Building2 className="w-6 h-6 text-emerald-400 mb-3" />
-
-                  <p className="text-xs text-slate-400">
-                    Department
-                  </p>
-
-                  <p className="text-white font-semibold mt-1">
-                    {faculty?.department || "Not specified"}
-                  </p>
-
-                </div>
-
-                <div className="p-5 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                  <GraduationCap className="w-6 h-6 text-violet-400 mb-3" />
-
-                  <p className="text-xs text-slate-400">
-                    Specialization
-                  </p>
-
-                  <p className="text-white font-semibold mt-1">
-                    {faculty?.specialization?.length
-                      ? faculty?.specialization.join(", ")
-                      : "Not specified"}
-                  </p>
-
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* ==================================================
-              AVAILABILITY  (editable)
-
-              The only fields a faculty member may change are availability
-              and preferences — `PUT /api/faculty/:id` keeps nothing else
-              off a faculty caller's body. Name, email and department stay
-              read-only above.
-          ================================================== */}
-
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg">
-
-            <div className="border-b border-slate-700/50 p-6">
-
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-
-                <div>
-
-                  <h2 className="text-xl font-semibold text-white">
-                    Availability & Preferences
-                  </h2>
-
-                  <p className="text-slate-400 mt-1">
-                    The slots you can teach, and the ones you would rather
-                    teach or avoid
-                  </p>
-
-                </div>
-
-                <div className="flex items-center gap-3">
-
-                  {editing ? (
-                    <>
-                      <button
-                        onClick={handleSave}
-                        disabled={saving || !facultyId}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {saving ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Save className="w-4 h-4" />
-                        )}
-                        {saving ? "Saving..." : "Save changes"}
-                      </button>
-
-                      <button
-                        onClick={cancelEditing}
-                        disabled={saving}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-600/50 bg-slate-700/30 text-slate-200 hover:bg-slate-600/40 transition-all disabled:opacity-50"
-                      >
-                        <X className="w-4 h-4" />
-                        Cancel
-                      </button>
-                    </>
+        <SectionCard
+          title="Availability & preferences"
+          description="The slots you can teach, and the ones you would rather teach or avoid."
+          icon={Clock}
+          actions={
+            editing ? (
+              <div className="flex items-center gap-2">
+                <Button onClick={handleSave} disabled={saving || !facultyId}>
+                  {saving ? (
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    <button
-                      onClick={startEditing}
-                      disabled={!facultyId}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Pencil className="w-4 h-4" />
-                      Edit
-                    </button>
+                    <Save className="size-4" />
                   )}
+                  {saving ? "Saving..." : "Save changes"}
+                </Button>
 
-                </div>
+                <Button variant="outline" onClick={cancelEditing} disabled={saving}>
+                  <X className="size-4" />
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" onClick={startEditing} disabled={!facultyId}>
+                <Pencil className="size-4" />
+                Edit
+              </Button>
+            )
+          }
+        >
+          <div className="space-y-6">
+            {saveError && (
+              <Callout tone="destructive" title="Could not save" icon={AlertCircle}>
+                {saveError}
+              </Callout>
+            )}
 
+            {!editing && saveMessage && (
+              <Callout tone="success" title="Saved" icon={CheckCircle2}>
+                {saveMessage}
+              </Callout>
+            )}
+
+            {/* Weekly availability */}
+
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">
+                  Weekly availability
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {editing
+                    ? "Select a slot to switch it on or off."
+                    : "Slots you are currently available to teach."}
+                </p>
               </div>
 
-              {saveError && (
-                <div className="mt-4 flex items-start gap-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                  <p className="text-sm text-red-300">
-                    {saveError}
-                  </p>
-                </div>
-              )}
+              {gridSlots.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  The timetable grid has no teaching slots configured.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {gridDays.map((day) => {
+                    const dayKey = String(day).toLowerCase();
 
-              {!editing && saveMessage && (
-                <div className="mt-4 flex items-start gap-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <p className="text-sm text-emerald-300">
-                    {saveMessage}
-                  </p>
-                </div>
-              )}
+                    return (
+                      <div
+                        key={dayKey}
+                        className="rounded-xl border border-border bg-muted/40 p-4"
+                      >
+                        <p className="mb-3 text-sm font-medium text-foreground">
+                          {day}
+                        </p>
 
-            </div>
+                        <div className="flex flex-wrap gap-2">
+                          {gridSlots.map((slot) => {
+                            const label = slotLabel(slot);
 
-            <div className="p-6 space-y-8">
+                            const active = editing
+                              ? (draftAvailability?.[dayKey] || []).some(
+                                  (window) =>
+                                    window.start === slot.start &&
+                                    window.end === slot.end
+                                )
+                              : coversSlot(savedAvailability[dayKey], slot);
 
-              {/* Weekly availability */}
+                            const className = cn(
+                              "rounded-md border px-3 py-1.5 text-xs font-medium tabular-nums transition-colors duration-150",
+                              active
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border bg-background text-muted-foreground"
+                            );
 
-              <div className="space-y-4">
-
-                <div className="flex items-center gap-3">
-
-                  <div className="p-2 rounded-lg bg-blue-500/20">
-                    <Clock className="w-5 h-5 text-blue-400" />
-                  </div>
-
-                  <div>
-
-                    <p className="text-white font-semibold">
-                      Weekly availability
-                    </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      {editing
-                        ? "Tap a slot to switch it on or off."
-                        : "Slots you are currently available to teach."}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                {gridSlots.length === 0 ? (
-
-                  <p className="text-slate-400 text-sm">
-                    The timetable grid has no teaching slots configured.
-                  </p>
-
-                ) : (
-
-                  <div className="space-y-3">
-
-                    {gridDays.map((day) => {
-
-                      const dayKey = String(day).toLowerCase();
-
-                      return (
-                        <div
-                          key={dayKey}
-                          className="p-4 bg-slate-700/20 border border-slate-600/30 rounded-xl"
-                        >
-
-                          <p className="text-sm font-semibold text-slate-200 mb-3">
-                            {day}
-                          </p>
-
-                          <div className="flex flex-wrap gap-2">
-
-                            {gridSlots.map((slot) => {
-
-                              const label = slotLabel(slot);
-
-                              const active = editing
-                                ? (draftAvailability?.[dayKey] || []).some(
-                                    (window) =>
-                                      window.start === slot.start &&
-                                      window.end === slot.end
-                                  )
-                                : coversSlot(savedAvailability[dayKey], slot);
-
-                              const className = `px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
-                                active
-                                  ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                                  : "bg-slate-800/40 border-slate-600/30 text-slate-500"
-                              }`;
-
-                              if (!editing) {
-                                return (
-                                  <span
-                                    key={label}
-                                    className={className}
-                                  >
-                                    {label}
-                                  </span>
-                                );
-                              }
-
+                            if (!editing) {
                               return (
-                                <button
-                                  key={label}
-                                  type="button"
-                                  onClick={() =>
-                                    toggleAvailabilitySlot(dayKey, slot)
-                                  }
-                                  aria-pressed={active}
-                                  className={`${className} hover:border-emerald-500/40 hover:text-emerald-200`}
-                                >
+                                <span key={label} className={className}>
                                   {label}
-                                </button>
+                                </span>
                               );
-                            })}
+                            }
 
-                          </div>
-
+                            return (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() =>
+                                  toggleAvailabilitySlot(dayKey, slot)
+                                }
+                                aria-pressed={active}
+                                className={cn(
+                                  className,
+                                  "hover:border-primary hover:text-foreground"
+                                )}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-
-                  </div>
-
-                )}
-
-              </div>
-
-              {/* Teaching preferences */}
-
-              <div className="space-y-4">
-
-                <div className="flex items-center gap-3">
-
-                  <div className="p-2 rounded-lg bg-violet-500/20">
-                    <Calendar className="w-5 h-5 text-violet-400" />
-                  </div>
-
-                  <div>
-
-                    <p className="text-white font-semibold">
-                      Teaching preferences
-                    </p>
-
-                    <p className="text-xs text-slate-400 mt-1">
-                      Soft constraints: the scheduler favours preferred slots
-                      and penalises avoided ones.
-                    </p>
-
-                  </div>
-
+                      </div>
+                    );
+                  })}
                 </div>
+              )}
+            </section>
 
-                {editing ? (
+            {/* Teaching preferences */}
 
-                  <div className="space-y-2">
-
-                    {gridSlots.map((slot) => {
-
-                      const label = slotLabel(slot);
-                      const preferred = draftPreferred.includes(label);
-                      const avoided = draftAvoided.includes(label);
-
-                      return (
-                        <div
-                          key={label}
-                          className="flex items-center justify-between gap-4 p-3 bg-slate-700/20 border border-slate-600/30 rounded-xl"
-                        >
-
-                          <span className="text-sm text-slate-200">
-                            {label}
-                          </span>
-
-                          <div className="flex gap-2">
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                togglePreference(label, "preferred")
-                              }
-                              aria-pressed={preferred}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                                preferred
-                                  ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
-                                  : "bg-slate-800/40 border-slate-600/30 text-slate-400 hover:text-blue-300"
-                              }`}
-                            >
-                              Prefer
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                togglePreference(label, "avoid")
-                              }
-                              aria-pressed={avoided}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                                avoided
-                                  ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-                                  : "bg-slate-800/40 border-slate-600/30 text-slate-400 hover:text-amber-300"
-                              }`}
-                            >
-                              Avoid
-                            </button>
-
-                          </div>
-
-                        </div>
-                      );
-                    })}
-
-                  </div>
-
-                ) : (
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                    <div className="p-4 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                      <p className="text-xs text-slate-400 mb-3">
-                        Preferred slots
-                      </p>
-
-                      {savedPreferred.length === 0 ? (
-
-                        <p className="text-sm text-slate-500">
-                          None set
-                        </p>
-
-                      ) : (
-
-                        <div className="flex flex-wrap gap-2">
-                          {savedPreferred.map((label) => (
-                            <span
-                              key={label}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/20 border border-blue-500/40 text-blue-300"
-                            >
-                              {label}
-                            </span>
-                          ))}
-                        </div>
-
-                      )}
-
-                    </div>
-
-                    <div className="p-4 bg-slate-700/20 border border-slate-600/30 rounded-xl">
-
-                      <p className="text-xs text-slate-400 mb-3">
-                        Slots to avoid
-                      </p>
-
-                      {savedAvoided.length === 0 ? (
-
-                        <p className="text-sm text-slate-500">
-                          None set
-                        </p>
-
-                      ) : (
-
-                        <div className="flex flex-wrap gap-2">
-                          {savedAvoided.map((label) => (
-                            <span
-                              key={label}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 border border-amber-500/40 text-amber-300"
-                            >
-                              {label}
-                            </span>
-                          ))}
-                        </div>
-
-                      )}
-
-                    </div>
-
-                  </div>
-
-                )}
-
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">
+                  Teaching preferences
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Soft constraints: the scheduler favours preferred slots and
+                  penalises avoided ones.
+                </p>
               </div>
 
-            </div>
+              {editing ? (
+                <div className="space-y-2">
+                  {gridSlots.map((slot) => {
+                    const label = slotLabel(slot);
+                    const preferred = draftPreferred.includes(label);
+                    const avoided = draftAvoided.includes(label);
 
+                    return (
+                      <div
+                        key={label}
+                        className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/40 p-3"
+                      >
+                        <span className="text-sm text-foreground tabular-nums">
+                          {label}
+                        </span>
+
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={preferred ? "default" : "outline"}
+                            onClick={() => togglePreference(label, "preferred")}
+                            aria-pressed={preferred}
+                          >
+                            Prefer
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={avoided ? "secondary" : "outline"}
+                            onClick={() => togglePreference(label, "avoid")}
+                            aria-pressed={avoided}
+                          >
+                            Avoid
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-muted/40 p-4">
+                    <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                      <CalendarDays className="size-4" />
+                      Preferred slots
+                    </p>
+
+                    {savedPreferred.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">None set</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {savedPreferred.map((label) => (
+                          <Badge key={label} className="tabular-nums">
+                            {label}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-muted/40 p-4">
+                    <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                      <CalendarDays className="size-4" />
+                      Slots to avoid
+                    </p>
+
+                    {savedAvoided.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">None set</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {savedAvoided.map((label) => (
+                          <Badge
+                            key={label}
+                            variant="outline"
+                            className="tabular-nums"
+                          >
+                            {label}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
           </div>
-
-        </div>
-
+        </SectionCard>
       </div>
-
-    </div>
+    </AppShell>
   );
 }

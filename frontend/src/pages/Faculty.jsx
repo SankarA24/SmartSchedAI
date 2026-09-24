@@ -5,8 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { FacultyForm } from "@/components/Faculty-Form"
 import { DataTable } from "@/components/Data-table"
-import { Plus, Users, Mail, Clock, Calendar, LayoutDashboard, BookOpen, Home, Bell, Loader2, UserCog, GraduationCap } from "lucide-react"
+import { Plus, Users, Mail, Clock, Loader2 } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/AppShell"
+import { navForRole } from "@/lib/nav"
 import { StatusBadge } from "@/components/StatusBadge"
 
 export default function FacultyPage() {
@@ -16,28 +17,7 @@ export default function FacultyPage() {
   const [formLoading, setFormLoading] = useState(false)
   const [editingFaculty, setEditingFaculty] = useState(null)
 
-  const brand = { title: "SmartSchedAI", subtitle: "Admin" }
-
-  const navigationItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
-    { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
-    { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
-    { id: "users", label: "Users", icon: UserCog, path: "/users" },
-    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
-    {
-      id: "timetables",
-      label: "Timetables",
-      icon: Calendar,
-      path: "/timetables",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/notifications",
-    },
-  ]
+  const { brand, nav, quickActions } = navForRole("admin")
 
   const fetchFaculty = async () => {
     setLoading(true)
@@ -197,7 +177,7 @@ export default function FacultyPage() {
 
   if (loading)
     return (
-      <AppShell brand={brand} nav={navigationItems}>
+      <AppShell brand={brand} nav={nav} quickActions={quickActions}>
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
           <Loader2 className="size-6 animate-spin" />
           <p className="text-sm">Loading faculty...</p>
@@ -206,7 +186,7 @@ export default function FacultyPage() {
     )
 
   return (
-    <AppShell brand={brand} nav={navigationItems}>
+    <AppShell brand={brand} nav={nav} quickActions={quickActions}>
       <PageHeader
         title="Faculty"
         description="Manage faculty members and their teaching information."

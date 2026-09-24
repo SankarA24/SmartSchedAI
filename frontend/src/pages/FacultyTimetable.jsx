@@ -1,31 +1,108 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
 import {
-  LayoutDashboard,
-  Calendar,
-  BookOpen,
-  Bell,
-  User,
-  LogOut,
+  CalendarDays,
+  CalendarOff,
   Clock,
-  GraduationCap,
+  DoorOpen,
+  LayoutGrid,
+  List,
+  Printer,
   ShieldAlert,
 } from "lucide-react";
 
 import api from "@/lib/api";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { navForRole } from "@/lib/nav";
+import { computeStats } from "@/lib/schedule";
 import { useIdentity } from "@/hooks/useIdentity";
+import { useSystemConfig } from "@/hooks/useSystemConfig";
+import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { SectionCard } from "@/components/common/SectionCard";
+import { StatCard } from "@/components/common/StatCard";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Callout } from "@/components/common/Callout";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
+/*
+  /faculty-portal/timetable — this faculty member's own week.
 
-function FacultyTimetable() {
+  The day-accordion renderer this page used to carry is gone: the week is
+  drawn by the shared `TimetableGrid` in `viewMode="byFaculty"` with
+  `groupValue` set to the signed-in member's own faculty id, over the
+  server-owned grid from `useSystemConfig()` (GET /api/config/grid). Days and
+  slots are never hardcoded here.
+
+  DATA SCOPING (unchanged by the re-skin):
+    - Identity comes from `useIdentity()` — no inline localStorage read.
+    - `linked === false` renders "Profile not linked — contact your
+      administrator" instead of anybody else's timetable.
+    - Only PUBLISHED timetables are read, and within them only entries whose
+      `facultyId` matches this user's own — a second layer on top of the
+      server's role scoping of GET /timetables.
+    - There is no "show the first timetable we can find" fallback: when none
+      of them carry an entry of theirs, the page stays empty.
+    - Room and course ids are resolved against the fetched collections, so
+      the grid shows names rather than raw ObjectIds.
+*/
+
+/*
+  GRID RECONCILIATION — identical helper to the one in pages/MyTimetable.jsx;
+  change one copy, change the other.
+
+  `<TimetableGrid>` only draws an entry whose `day` is one of `grid.days` and
+  whose `startTime` is exactly the `start` of one of `grid.slots` (Matrix does
+  `index.get(day)?.get(row.start)`). An entry stored against an older period
+  layout, a working day the institution has since dropped, or a start time
+  that now falls inside a break is swallowed without a message. The List view
+  below shows every entry regardless, but nothing told the user to switch, so
+  the entries the grid cannot place are counted here and named in a Callout.
+
+  The predicate mirrors `lib/schedule.js#groupByDay` (case-insensitive day
+  match) and `TimetableGrid#indexByDayAndSlot` (exact `startTime` string).
+*/
+function partitionAgainstGrid(entries, grid) {
+  const list = Array.isArray(entries) ? entries : [];
+
+  const days = (grid?.days || []).map((day) => String(day).toLowerCase());
+  const starts = new Set((grid?.slots || []).map((slot) => String(slot.start)));
+
+  // No usable grid yet (config still loading): nothing to reconcile against.
+  if (days.length === 0 || starts.size === 0) {
+    return { onGrid: list, offGrid: [] };
+  }
+
+  const onGrid = [];
+  const offGrid = [];
+
+  list.forEach((entry) => {
+    const day = String(entry?.day || "").toLowerCase();
+    const start = String(entry?.startTime || "");
+
+    if (days.includes(day) && starts.has(start)) {
+      onGrid.push(entry);
+    } else {
+      offGrid.push(entry);
+    }
+  });
+
+  return { onGrid, offGrid };
+}
+
+/** `Map<id, doc>` keyed the way `lib/schedule.js#resolveEntry` reads it. */
+function toIdMap(list) {
+  const map = new Map();
+  for (const item of list || []) {
+    const id = item?._id ?? item?.id;
+    if (id != null) map.set(String(id), item);
+  }
+  return map;
+}
+
+export default function FacultyTimetable() {
   const navigate = useNavigate();
 
   // Who is signed in — resolved once by the shared hook (GET /api/auth/me),
@@ -33,16 +110,20 @@ function FacultyTimetable() {
   // has no Faculty record behind it.
   const {
     user,
+    faculty,
     linked,
     loading: identityLoading,
     error: identityError,
   } = useIdentity();
+
+  const { grid } = useSystemConfig();
 
   const [timetable, setTimetable] = useState([]);
   const [courses, setCourses] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [display, setDisplay] = useState("grid");
 
   const facultyId = user?.facultyId ? String(user.facultyId) : "";
   const role = user?.role || "";
@@ -160,123 +241,62 @@ function FacultyTimetable() {
     };
   }, [identityLoading, linked, facultyId]);
 
-  const groupedTimetable = useMemo(() => {
-    const result = {};
+  // Course and room ids in `Timetable.schedule[]` are plain strings; these
+  // lookups are what turns them into names in the grid instead of raw
+  // ObjectIds. `faculty` holds only the signed-in member's own record —
+  // every entry on this page is theirs.
+  const maps = useMemo(
+    () => ({
+      courses: toIdMap(courses),
+      rooms: toIdMap(rooms),
+      faculty: toIdMap(faculty ? [faculty] : []),
+    }),
+    [courses, rooms, faculty]
+  );
 
-    DAYS.forEach((day) => {
-      result[day] = [];
-    });
+  const stats = useMemo(
+    () => computeStats(timetable, grid, maps),
+    [timetable, grid, maps]
+  );
 
-    timetable.forEach((entry) => {
-      if (result[entry.day]) {
-        result[entry.day].push(entry);
-      }
-    });
+  // Entries the grid cannot place — surfaced rather than swallowed.
+  const { offGrid } = useMemo(
+    () => partitionAgainstGrid(timetable, grid),
+    [timetable, grid]
+  );
 
-    DAYS.forEach((day) => {
-      result[day].sort((a, b) =>
-        String(a.startTime).localeCompare(String(b.startTime))
-      );
-    });
-
-    return result;
+  const teachingDays = useMemo(() => {
+    const days = new Set(
+      timetable
+        .map((entry) => String(entry.day || "").toLowerCase())
+        .filter((day) => day !== "")
+    );
+    return days.size;
   }, [timetable]);
 
-const getCourseName = (entry) => {
-  if (entry.courseName) return entry.courseName;
+  // --------------------------------------------------
+  // Shell (navigation is shared — see lib/nav.js)
+  // --------------------------------------------------
 
-  if (entry.course?.name) {
-    return entry.course.name;
-  }
+  const { brand, nav, quickActions } = navForRole("faculty");
 
-  const courseId = String(entry.courseId || "");
-
-  const course = courses.find(
-    (course) =>
-      String(course._id || course.id) === courseId
-  );
-
-  return course?.name || courseId || "Course";
-};
-
-const getRoomName = (entry) => {
-  if (entry.roomName) return entry.roomName;
-
-  if (entry.room?.name) {
-    return entry.room.name;
-  }
-
-  const roomId = String(entry.roomId || "");
-
-  const room = rooms.find(
-    (room) =>
-      String(room._id || room.id) === roomId
-  );
-
-  return room?.name || roomId || "Room";
-};
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    navigate("/login");
-  };
-  const navigationItems = [
-    {
-      id: "dashboard",
-      label: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/faculty-portal",
-    },
-    {
-      id: "timetable",
-      label: "My Timetable",
-      icon: Calendar,
-      path: "/faculty-portal/timetable",
-    },
-    {
-      id: "courses",
-      label: "My Courses",
-      icon: BookOpen,
-      path: "/faculty-portal/courses",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/faculty-portal/notifications",
-    },
-    {
-      id: "profile",
-      label: "My Profile",
-      icon: User,
-      path: "/faculty-portal/profile",
-    },
-  ];
-
-  const handleNavigation = (path) => {
-    navigate(path);
-  };
+  const shellProps = { brand, nav, quickActions };
 
   if (identityLoading || loading) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
+      <AppShell {...shellProps}>
+        <div className="space-y-6">
+          <Skeleton className="h-9 w-64" />
 
-        <div className="flex-1 flex items-center justify-center relative z-10">
-          <div className="text-center">
-            <div className="w-12 h-12 border-4 border-blue-400/30 border-t-blue-400 rounded-full animate-spin mx-auto mb-5" />
-
-            <h2 className="text-xl font-semibold text-white">
-              Loading timetable...
-            </h2>
-
-            <p className="text-slate-400 mt-2">
-              Fetching your assigned classes
-            </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, index) => (
+              <Skeleton key={index} className="h-24" />
+            ))}
           </div>
+
+          <Skeleton className="h-96 w-full" />
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -287,467 +307,169 @@ const getRoomName = (entry) => {
 
   if (!linked) {
     return (
-      <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
-
-        <div className="flex-1 flex items-center justify-center relative z-10 p-8">
-          <div className="max-w-md text-center">
-            <ShieldAlert className="w-12 h-12 text-amber-400 mx-auto mb-5" />
-
-            <h2 className="text-xl font-semibold text-white">
-              Profile not linked — contact your administrator
-            </h2>
-
-            <p className="text-slate-400 mt-2">
-              {identityError ||
-                `Your account${
-                  user?.email ? ` (${user.email})` : ""
-                } is not linked to a faculty record, so there is no timetable to show.`}
-            </p>
-          </div>
+      <AppShell {...shellProps}>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <EmptyState
+            icon={ShieldAlert}
+            title="Profile not linked — contact your administrator"
+            description={
+              identityError ||
+              `Your account${
+                user?.email ? ` (${user.email})` : ""
+              } is not linked to a faculty record, so there is no timetable to show.`
+            }
+          />
         </div>
-      </div>
+      </AppShell>
     );
   }
 
+  const facultyName = faculty?.name || user?.name || "Faculty";
+
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+    <AppShell {...shellProps}>
+      <PageHeader
+        title="My Timetable"
+        description={`Your assigned classes — ${facultyName}`}
+        actions={
+          <>
+            <Tabs value={display} onValueChange={setDisplay}>
+              <TabsList variant="pill">
+                <TabsTrigger value="grid">
+                  <LayoutGrid /> Grid
+                </TabsTrigger>
+                <TabsTrigger value="list">
+                  <List /> List
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-      {/* Background effects */}
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 via-purple-600/5 to-cyan-600/5" />
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="size-4" />
+              Print
+            </Button>
+          </>
+        }
+      />
 
-      <div className="absolute inset-0">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
-
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-pulse" />
-      </div>
-
-      {/* ==================================================
-          SIDEBAR
-      ================================================== */}
-
-      <div className="w-64 bg-slate-800/30 backdrop-blur-xl border-r border-slate-700/50 shadow-2xl relative z-10">
-
-        <div className="p-6 space-y-8">
-
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <GraduationCap className="w-6 h-6 text-white" />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-bold text-white">
-                Smart Scheduler
-              </h2>
-
-              <p className="text-xs text-slate-400">
-                Faculty Portal
-              </p>
-            </div>
-
-          </div>
-
-          {/* Navigation */}
-          <nav className="space-y-2">
-
-            {navigationItems.map((item) => {
-              const IconComponent = item.icon;
-
-              const isActive = item.id === "timetable";
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavigation(item.path)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${
-                    isActive
-                      ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/20 text-white shadow-lg shadow-blue-500/10 border border-blue-500/30"
-                      : "text-slate-300 hover:bg-slate-700/30 hover:text-white"
-                  }`}
-                >
-
-                  <IconComponent
-                    className={`w-5 h-5 transition-transform duration-300 ${
-                      isActive
-                        ? "text-blue-400"
-                        : "text-slate-400 group-hover:text-slate-200"
-                    }`}
-                  />
-
-<span
-  className={`font-medium ${
-    isActive ? "text-white" : ""
-  }`}
->
-  {item.label}
-</span>
-
-                </button>
-              );
-            })}
-
-          </nav>
-
-          {/* Logout */}
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-300 hover:bg-red-500/10 hover:text-red-400 border border-transparent hover:border-red-500/20 transition-all duration-300"
+      {error ? (
+        <div className="mb-6">
+          <Callout
+            tone="destructive"
+            title="Unable to load timetable"
+            icon={ShieldAlert}
           >
-            <LogOut className="w-5 h-5" />
-
-            <span className="font-medium">
-              Logout
-            </span>
-          </button>
-
+            {error}
+          </Callout>
         </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Total Classes"
+          value={stats.totalClasses}
+          icon={CalendarDays}
+        />
+
+        <StatCard label="Teaching Days" value={teachingDays} icon={CalendarDays} />
+
+        <StatCard label="Weekly Hours" value={stats.hoursPerWeek} icon={Clock} />
+
+        <StatCard
+          label="Rooms Used"
+          value={timetable.length ? stats.rooms : 0}
+          icon={DoorOpen}
+        />
       </div>
 
-      {/* ==================================================
-          MAIN CONTENT
-      ================================================== */}
-
-<div className="flex-1 overflow-auto relative z-10">
-
-        <div className="p-8 space-y-7">
-
-          {/* Header */}
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-
-            <div className="space-y-3">
-
-              <h1 className="text-4xl lg:text-5xl font-bold text-white leading-tight bg-gradient-to-r from-white via-blue-100 to-cyan-100 bg-clip-text text-transparent">
-                My Timetable
-              </h1>
-
-              <p className="text-lg text-slate-300">
-                Your assigned classes for the current semester
-              </p>
-
-            </div>
-
-            <div className="px-4 py-3 rounded-xl bg-slate-800/30 backdrop-blur-sm border border-slate-700/50">
-
-              <p className="text-xs text-slate-400">
-                Faculty
-              </p>
-
-              <p className="text-sm font-semibold text-white">
-                {user?.name || "Faculty"}
-              </p>
-
-            </div>
-
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5">
-
-              <p className="font-semibold text-red-400">
-                Unable to load timetable
-              </p>
-
-              <p className="text-sm text-red-300 mt-1">
-                {error}
-              </p>
-
-            </div>
-          )}
-
-          {/* ==================================================
-              SUMMARY CARDS
-          ================================================== */}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-            {/* Total Classes */}
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-blue-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-5">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-blue-500/20 border border-white/10">
-                    <Calendar className="h-6 w-6 text-blue-400" />
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Total Classes
-                    </p>
-
-                    <p className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
-                      {timetable.length}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-blue-500/10 to-cyan-500/10" />
-
-              </div>
-
-            </div>
-
-            {/* Teaching Days */}
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-emerald-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-6">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-emerald-500/20 border border-white/10">
-                    <Calendar className="h-6 w-6 text-emerald-400" />
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Teaching Days
-                    </p>
-
-                    <p className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
-                      {
-                        DAYS.filter(
-                          (day) => groupedTimetable[day].length > 0
-                        ).length
-                      }
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-emerald-500/10 to-teal-500/10" />
-
-              </div>
-
-            </div>
-
-            {/* Faculty */}
-            <div className="bg-slate-800/30 backdrop-blur-xl border border-violet-500/20 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-
-              <div className="p-5">
-
-                <div className="flex items-center justify-between mb-4">
-
-                  <div className="p-3 rounded-xl bg-violet-500/20 border border-white/10">
-                    <User className="h-6 w-6 text-violet-400" />
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm text-slate-400">
-                      Faculty
-                    </p>
-
-                    <p className="text-xl font-bold text-white mt-1">
-                      {user?.name || "Faculty"}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="h-2 rounded-full bg-gradient-to-r from-violet-500/10 to-purple-500/10" />
-
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* ==================================================
-              WEEKLY SCHEDULE
-          ================================================== */}
-
-          <div className="bg-slate-800/30 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-lg">
-
-            {/* Section Header */}
-            <div className="border-b border-slate-700/50 p-6">
-
-              <h2 className="text-xl font-semibold text-white">
-                Weekly Schedule
-              </h2>
-
-              <p className="text-slate-400 mt-1">
-                Monday to Saturday
-              </p>
-
-            </div>
-
-            {/* Schedule */}
-            <div className="p-5">
-
-              {timetable.length === 0 && !error ? (
-
-                <div className="text-center py-12">
-
-                  <Calendar className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-
-                  <h3 className="text-lg font-semibold text-white mb-2">
-                    No Classes Scheduled
-                  </h3>
-
-                  <p className="text-slate-400">
-                    Your timetable doesn't contain any assigned classes yet.
-                  </p>
-
-                </div>
-
-              ) : (
-
-                <div className="space-y-4">
-
-                  {DAYS.map((day) => (
-
-                    <div
-                      key={day}
-                      className="bg-slate-700/20 border border-slate-600/30 rounded-xl overflow-hidden"
+      <div className="mt-6">
+        <SectionCard
+          title="Weekly Schedule"
+          description="Only your own classes, drawn on the institution's scheduling grid"
+          icon={CalendarDays}
+          padded={false}
+          className="overflow-hidden"
+        >
+          <div className="px-6 pb-2">
+            {timetable.length === 0 && !error ? (
+              <EmptyState
+                icon={CalendarDays}
+                title="No Classes Scheduled"
+                description="Your timetable doesn't contain any assigned classes yet."
+              />
+            ) : display === "list" ? (
+              <TimetableListView
+                schedule={timetable}
+                grid={grid}
+                maps={maps}
+                groupBy="day"
+              />
+            ) : (
+              <div className="space-y-4">
+                <TimetableGrid
+                  className="print:hidden"
+                  schedule={timetable}
+                  grid={grid}
+                  maps={maps}
+                  viewMode="byFaculty"
+                  groupValue={facultyId}
+                  colorMode="course"
+                />
+
+                {/* Nothing disappears silently: whatever the grid could not
+                    place is named and then listed underneath it. */}
+                {offGrid.length > 0 ? (
+                  <div className="space-y-3 print:hidden">
+                    <Callout
+                      tone="warning"
+                      title={`${offGrid.length} ${
+                        offGrid.length === 1 ? "class falls" : "classes fall"
+                      } outside the current timetable grid`}
+                      icon={CalendarOff}
                     >
+                      Their day or start time no longer matches a period in the
+                      institution&apos;s scheduling grid, so the week above
+                      cannot show them. They are listed below, and the List
+                      view shows every class.
+                    </Callout>
 
-                      {/* Day Header */}
-                      <div className="px-5 py-4 bg-slate-700/20 border-b border-slate-600/30">
+                    <TimetableListView
+                      schedule={offGrid}
+                      grid={grid}
+                      maps={maps}
+                      groupBy="day"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            )}
 
-                        <div className="flex items-center justify-between">
-
-                          <div>
-
-                            <h3 className="text-lg font-semibold text-white">
-                              {day}
-                            </h3>
-
-                            <p className="text-xs text-slate-400 mt-1">
-                              {groupedTimetable[day].length} class
-                              {groupedTimetable[day].length !== 1
-                                ? "es"
-                                : ""}
-                            </p>
-
-                          </div>
-
-                          <Calendar className="w-5 h-5 text-blue-400" />
-
-                        </div>
-
-                      </div>
-
-                      {/* Day Entries */}
-                      {groupedTimetable[day].length === 0 ? (
-
-                        <div className="px-5 py-5 text-slate-500 text-sm">
-                          No classes scheduled
-                        </div>
-
-                      ) : (
-
-                        <div className="divide-y divide-slate-600/20">
-
-                          {groupedTimetable[day].map((entry, index) => (
-
-                            <div
-                              key={`${day}-${index}`}
-                    
-                              className="px-5 py-4 hover:bg-slate-600/20 transition-all duration-300"
-                            >
-
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-
-                                {/* Time */}
-                                <div className="flex items-start gap-3">
-
-                                  <div className="p-2 rounded-lg bg-blue-500/10">
-                                    <Clock className="w-4 h-4 text-blue-400" />
-                                  </div>
-
-                                  <div>
-
-                                    <p className="text-xs text-slate-500">
-                                      TIME
-                                    </p>
-
-                                    <p className="font-semibold text-white mt-1">
-                                      {entry.startTime} - {entry.endTime}
-                                    </p>
-
-                                  </div>
-
-                                </div>
-
-                                {/* Course */}
-                                <div>
-
-                                  <p className="text-xs text-slate-500">
-                                    COURSE
-                                  </p>
-
-                                  <p className="font-semibold text-white mt-1">
-                                    {getCourseName(entry)}
-                                  </p>
-
-                                </div>
-
-                                {/* Room */}
-                                <div>
-
-                                  <p className="text-xs text-slate-500">
-                                    ROOM
-                                  </p>
-
-                                  <p className="font-semibold text-white mt-1">
-                                    {getRoomName(entry)}
-                                  </p>
-
-                                </div>
-
-                                {/* Day */}
-                                <div>
-
-                                  <p className="text-xs text-slate-500">
-                                    DAY
-                                  </p>
-
-                                  <p className="font-semibold text-white mt-1">
-                                    {entry.day}
-                                  </p>
-
-                                </div>
-
-                              </div>
-
-                            </div>
-
-                          ))}
-
-                        </div>
-
-                      )}
-
-                    </div>
-
-                  ))}
-
-                </div>
-
-              )}
-
-            </div>
-
+            {/* Institutional A4 table — screen-hidden, used by Print. */}
+            {timetable.length > 0 ? (
+              <TimetableGrid
+                className="hidden print:block"
+                schedule={timetable}
+                grid={grid}
+                maps={maps}
+                viewMode="byFaculty"
+                groupValue={facultyId}
+                printable
+                showLegend={false}
+                title={`Timetable — ${facultyName}`}
+                subtitle={
+                  timetable[0]?.department
+                    ? `${timetable[0].department}${
+                        timetable[0].semester
+                          ? ` · Semester ${timetable[0].semester}`
+                          : ""
+                      }`
+                    : undefined
+                }
+              />
+            ) : null}
           </div>
-
-        </div>
-
+        </SectionCard>
       </div>
-
-    </div>
+    </AppShell>
   );
 }
-
-export default FacultyTimetable;

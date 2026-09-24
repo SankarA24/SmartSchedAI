@@ -8,18 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DataTable } from "@/components/Data-table"
-import {
-  Plus,
-  BookOpen,
-  Users,
-  Calendar,
-  LayoutDashboard,
-  Home,
-  Bell,
-  GraduationCap,
-  UserCog,
-} from "lucide-react"
+import { Plus, GraduationCap } from "lucide-react"
 import { AppShell, PageHeader } from "@/components/AppShell"
+import { navForRole } from "@/lib/nav"
 import { StatusBadge } from "@/components/StatusBadge"
 
 // =====================================================
@@ -197,28 +188,7 @@ export default function StudentsPage() {
   const [formLoading, setFormLoading] = useState(false)
   const [editingStudent, setEditingStudent] = useState(null)
 
-  const brand = { title: "SmartSchedAI", subtitle: "Admin" }
-
-  const navigationItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
-    { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
-    { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
-    { id: "users", label: "Users", icon: UserCog, path: "/users" },
-    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
-    {
-      id: "timetables",
-      label: "Timetables",
-      icon: Calendar,
-      path: "/timetables",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/notifications",
-    },
-  ]
+  const { brand, nav, quickActions } = navForRole("admin")
 
   // Fetch students from backend
   const fetchStudents = async () => {
@@ -357,7 +327,7 @@ export default function StudentsPage() {
 
   if (loading) {
     return (
-      <AppShell brand={brand} nav={navigationItems}>
+      <AppShell brand={brand} nav={nav} quickActions={quickActions}>
         <div className="space-y-6">
           <div className="h-9 w-72 animate-pulse rounded-md bg-muted" />
           <div className="h-5 w-96 animate-pulse rounded-md bg-muted" />
@@ -368,7 +338,7 @@ export default function StudentsPage() {
   }
 
   return (
-    <AppShell brand={brand} nav={navigationItems}>
+    <AppShell brand={brand} nav={nav} quickActions={quickActions}>
       <PageHeader
         title="Students"
         description="Manage student records and their academic details."

@@ -1,540 +1,625 @@
-import { useEffect, useState } from "react"
-import api from "@/lib/api"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Plus,
-  Users,
-  Calendar,
-  LayoutDashboard,
-  BookOpen,
-  Home,
-  Bell,
-  Trash2,
   AlertTriangle,
-  CheckCircle,
-  Info,
+  Bell,
   Check,
-  UserCog,
-  GraduationCap,
+  CheckCircle2,
+  Info,
   MessageSquare,
+  Plus,
+  Radio,
   Send,
-} from "lucide-react"
-import { Link } from "react-router-dom"
+  Trash2,
+} from "lucide-react";
+
+import api from "@/lib/api";
+import { navForRole } from "@/lib/nav";
+import { useSocket } from "@/hooks/useSocket";
+import { AppShell, PageHeader } from "@/components/AppShell";
+import { StatCard } from "@/components/common/StatCard";
+import { SectionCard } from "@/components/common/SectionCard";
+import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+
+// =====================================================
+// /notifications — admin notification feed + query inbox (U9)
+//
+// Re-skin plus one behavioural addition. Unchanged: the notification CRUD
+// (`GET/POST /api/notifications`, `PUT /api/notifications/:id/read`,
+// `DELETE /api/notifications/:id`) and the admin query inbox
+// (`GET /api/queries`, `PUT /api/queries/:id/reply`) carried over verbatim
+// from the previous version of this page — replying is still the only way a
+// query leaves status "open", and the reply notification is addressed to the
+// author alone (`recipientUserId`, never a role audience), so no other
+// faculty member or student ever reads the subject or the answer.
+//
+// Added: the unread count is now live. `useSocket` gives us the shared
+// connection, and `backend/utils/notify.js#createAndEmit` emits the saved
+// document as a "notification" event into the caller's role room
+// (`role:admin`) or private user room. Prepending it to the list feeds the
+// same derived `unreadCount` that drives the header bell and the sidebar
+// badge, so a notification raised by a generation run or a query shows up
+// without a refresh.
+// =====================================================
+
+const NOTIFICATION_TONES = {
+  error: { icon: AlertTriangle, accent: "border-l-destructive", variant: "destructive" },
+  warning: { icon: AlertTriangle, accent: "border-l-warning", variant: "warning" },
+  success: { icon: CheckCircle2, accent: "border-l-success", variant: "success" },
+  info: { icon: Info, accent: "border-l-primary", variant: "info" },
+};
+
+function toneFor(type) {
+  return NOTIFICATION_TONES[String(type || "").toLowerCase()] || NOTIFICATION_TONES.info;
+}
+
+const PRIORITY_VARIANTS = {
+  high: "destructive",
+  medium: "warning",
+  low: "neutral",
+};
+
+function byNewestFirst(a, b) {
+  return new Date(b.createdAt) - new Date(a.createdAt);
+}
+
+function emptyForm() {
+  return { title: "", message: "", type: "info", priority: "low" };
+}
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [formLoading, setFormLoading] = useState(false)
-  const [activeNavItem, setActiveNavItem] = useState("notifications")
-  const [notificationToDelete, setNotificationToDelete] = useState(null)
+  const { brand, nav, quickActions } = navForRole("admin");
+  const { socket, connected } = useSocket();
 
-  const [formData, setFormData] = useState({
-    title: "",
-    message: "",
-    type: "info",
-    priority: "low",
-  })
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [feedError, setFeedError] = useState("");
+
+  const [showForm, setShowForm] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
+  const [formData, setFormData] = useState(emptyForm);
+
+  const [notificationToDelete, setNotificationToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Queries raised by faculty and students. GET /api/queries returns every
   // row for an admin (scopeFilter in backend/routes/queriesRoute.js); the
   // authors themselves only ever get their own.
-  const [queries, setQueries] = useState([])
-  const [queriesLoading, setQueriesLoading] = useState(true)
-  const [queriesError, setQueriesError] = useState("")
-  const [replyDrafts, setReplyDrafts] = useState({})
-  const [replyingId, setReplyingId] = useState(null)
+  const [queries, setQueries] = useState([]);
+  const [queriesLoading, setQueriesLoading] = useState(true);
+  const [queriesError, setQueriesError] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [replyingId, setReplyingId] = useState(null);
 
-  const resetForm = () => {
-    setFormData({ title: "", message: "", type: "info", priority: "low" })
-  }
+  const resetForm = () => setFormData(emptyForm());
 
-  const fetchNotifications = async () => {
-    setLoading(true)
+  const fetchNotifications = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await api.get("/notifications")
-      setNotifications(Array.isArray(res.data) ? res.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)) : [])
+      const res = await api.get("/notifications");
+      setNotifications(
+        Array.isArray(res.data) ? [...res.data].sort(byNewestFirst) : []
+      );
+      setFeedError("");
     } catch (error) {
-      console.error("Error fetching notifications:", error)
-      setNotifications([])
+      console.error("Error fetching notifications:", error);
+      setNotifications([]);
+      setFeedError("Unable to load notifications.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  }, []);
 
-  const fetchQueries = async () => {
-    setQueriesLoading(true)
+  const fetchQueries = useCallback(async () => {
+    setQueriesLoading(true);
     try {
-      const res = await api.get("/queries")
-      setQueries(
-        Array.isArray(res.data)
-          ? res.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-          : []
-      )
-      setQueriesError("")
+      const res = await api.get("/queries");
+      setQueries(Array.isArray(res.data) ? [...res.data].sort(byNewestFirst) : []);
+      setQueriesError("");
     } catch (error) {
-      console.error("Error fetching queries:", error)
-      setQueries([])
-      setQueriesError("Unable to load queries.")
+      console.error("Error fetching queries:", error);
+      setQueries([]);
+      setQueriesError("Unable to load queries.");
     } finally {
-      setQueriesLoading(false)
+      setQueriesLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    fetchNotifications()
-    fetchQueries()
-  }, [])
+    fetchNotifications();
+    fetchQueries();
+  }, [fetchNotifications, fetchQueries]);
+
+  // Live feed: every notification this admin is an audience for arrives here
+  // as it is created. De-duplicated by `_id` so a socket event that races the
+  // POST response cannot show the same row twice.
+  useEffect(() => {
+    if (!socket) return undefined;
+
+    const onNotification = (incoming) => {
+      if (!incoming?._id) return;
+      setNotifications((prev) =>
+        prev.some((n) => n._id === incoming._id)
+          ? prev
+          : [incoming, ...prev].sort(byNewestFirst)
+      );
+    };
+
+    socket.on("notification", onNotification);
+    return () => socket.off("notification", onNotification);
+  }, [socket]);
 
   // The reply is delivered to the author alone: the route addresses the
   // notification by recipientUserId only, never by role audience.
   const handleReply = async (id) => {
-    const reply = (replyDrafts[id] || "").trim()
-    if (!reply) return
-    setReplyingId(id)
+    const reply = (replyDrafts[id] || "").trim();
+    if (!reply) return;
+    setReplyingId(id);
     try {
-      const res = await api.put(`/queries/${id}/reply`, { reply })
-      const updated = res.data
-      setQueries((prev) => prev.map((q) => (q._id === id ? { ...q, ...updated } : q)))
-      setReplyDrafts((prev) => ({ ...prev, [id]: "" }))
-      setQueriesError("")
+      const res = await api.put(`/queries/${id}/reply`, { reply });
+      const updated = res.data;
+      setQueries((prev) => prev.map((q) => (q._id === id ? { ...q, ...updated } : q)));
+      setReplyDrafts((prev) => ({ ...prev, [id]: "" }));
+      setQueriesError("");
     } catch (error) {
-      console.error("Error replying to query:", error)
-      setQueriesError(error?.response?.data?.error || "Unable to send that reply.")
+      console.error("Error replying to query:", error);
+      setQueriesError(error?.response?.data?.error || "Unable to send that reply.");
     } finally {
-      setReplyingId(null)
+      setReplyingId(null);
     }
-  }
+  };
 
-  const handleSubmitNotification = async (e) => {
-    e.preventDefault()
-    setFormLoading(true)
+  const handleSubmitNotification = async (event) => {
+    event.preventDefault();
+    setFormLoading(true);
     try {
-      await api.post("/notifications", formData)
-      resetForm()
-      setShowForm(false)
-      fetchNotifications()
+      await api.post("/notifications", formData);
+      resetForm();
+      setShowForm(false);
+      setFeedError("");
+      fetchNotifications();
     } catch (error) {
-      console.error("Error creating notification:", error)
+      console.error("Error creating notification:", error);
+      setFeedError(
+        error?.response?.data?.error || "Unable to send that notification."
+      );
     } finally {
-      setFormLoading(false)
+      setFormLoading(false);
     }
-  }
+  };
 
   const confirmDeleteNotification = async () => {
-    if (!notificationToDelete) return
+    if (!notificationToDelete) return;
+    setDeleting(true);
     try {
-      await api.delete(`/notifications/${notificationToDelete._id}`)
-      setNotifications((prev) => prev.filter((n) => n._id !== notificationToDelete._id))
+      await api.delete(`/notifications/${notificationToDelete._id}`);
+      setNotifications((prev) => prev.filter((n) => n._id !== notificationToDelete._id));
+      setFeedError("");
     } catch (error) {
-      console.error("Error deleting notification:", error)
+      console.error("Error deleting notification:", error);
+      setFeedError("Unable to delete that notification.");
     } finally {
-      setNotificationToDelete(null) // Close the confirmation modal
+      setDeleting(false);
+      setNotificationToDelete(null);
     }
-  }
+  };
 
   const handleMarkAsRead = async (id) => {
     try {
-      await api.put(`/notifications/${id}/read`)
-      setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)))
+      await api.put(`/notifications/${id}/read`);
+      setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)));
     } catch (error) {
-      console.error("Error marking as read:", error)
+      console.error("Error marking as read:", error);
     }
-  }
+  };
 
   const handleMarkAllRead = async () => {
-    const unreadIds = notifications.filter((n) => !n.isRead).map((n) => n._id)
+    const unreadIds = notifications.filter((n) => !n.isRead).map((n) => n._id);
     try {
-      await Promise.all(unreadIds.map((id) => api.put(`/notifications/${id}/read`)))
-      fetchNotifications()
+      await Promise.all(unreadIds.map((id) => api.put(`/notifications/${id}/read`)));
+      fetchNotifications();
     } catch (error) {
-      console.error("Error marking all as read:", error)
+      console.error("Error marking all as read:", error);
     }
-  }
+  };
 
-  const navigationItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { id: "courses", label: "Courses", icon: BookOpen, path: "/courses" },
-    { id: "faculty", label: "Faculty", icon: Users, path: "/faculty" },
-    { id: "rooms", label: "Rooms", icon: Home, path: "/rooms" },
-    { id: "users", label: "Users", icon: UserCog, path: "/users" },
-    { id: "students", label: "Students", icon: GraduationCap, path: "/students" },
-    { id: "timetables", label: "Timetables", icon: Calendar, path: "/timetables" },
-    { id: "notifications", label: "Notifications", icon: Bell, path: "/notifications" },
-  ]
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !n.isRead).length,
+    [notifications]
+  );
+  const openQueryCount = useMemo(
+    () => queries.filter((q) => q.status !== "answered").length,
+    [queries]
+  );
 
-  const getNotificationIcon = (type) => {
-    switch (type) {
-      case "error":
-        return <AlertTriangle className="h-5 w-5 text-red-400" />
-      case "warning":
-        return <AlertTriangle className="h-5 w-5 text-yellow-400" />
-      case "success":
-        return <CheckCircle className="h-5 w-5 text-green-400" />
-      case "info":
-      default:
-        return <Info className="h-5 w-5 text-blue-400" />
-    }
-  }
-
-  const getNotificationColor = (type, isRead) => {
-    if (isRead) return "bg-slate-800/40 border-slate-700/50"
-    switch (type) {
-      case "error":
-        return "bg-red-500/10 border-red-400/30 border-l-4 border-l-red-400"
-      case "warning":
-        return "bg-yellow-500/10 border-yellow-400/30 border-l-4 border-l-yellow-400"
-      case "success":
-        return "bg-green-500/10 border-green-400/30 border-l-4 border-l-green-400"
-      case "info":
-      default:
-        return "bg-blue-500/10 border-blue-400/30 border-l-4 border-l-blue-400"
-    }
-  }
-
-  const getPriorityBadgeClass = (priority) => {
-    switch (priority) {
-      case "high":
-        return "bg-gradient-to-r from-red-500/20 to-rose-600/20 text-red-300 border-red-500/30"
-      case "medium":
-        return "bg-gradient-to-r from-yellow-500/20 to-amber-600/20 text-yellow-300 border-yellow-500/30"
-      case "low":
-      default:
-        return "bg-gradient-to-r from-slate-600/20 to-slate-700/20 text-slate-300 border-slate-500/30"
-    }
-  }
-
-  const unreadCount = notifications.filter((n) => !n.isRead).length
-  const openQueryCount = queries.filter((q) => q.status !== "answered").length
+  // The sidebar badge is the same live count as the header bell.
+  const navWithBadges = useMemo(
+    () =>
+      nav.map((item) =>
+        item.badgeKey === "unread" ? { ...item, badge: unreadCount } : item
+      ),
+    [nav, unreadCount]
+  );
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
-      {/* Background Decor */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-gradient-to-r from-purple-500/10 to-pink-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
-      </div>
+    <AppShell
+      brand={brand}
+      nav={navWithBadges}
+      quickActions={quickActions}
+      header={{
+        notifications: unreadCount,
+        onNotificationsClick: fetchNotifications,
+        settingsPath: "/infrastructure",
+      }}
+      chatbot={{ context: { page: "notifications", unread: unreadCount } }}
+    >
+      <PageHeader
+        title="Notifications"
+        description="Broadcast system alerts and answer the queries faculty and students raise."
+        actions={
+          <>
+            <StatusBadge variant={connected ? "success" : "neutral"}>
+              <Radio className="size-3" />
+              {connected ? "Live" : "Offline"}
+            </StatusBadge>
+            <Button onClick={() => setShowForm((open) => !open)}>
+              <Plus className="size-4" />
+              Add Notification
+            </Button>
+          </>
+        }
+      />
 
-      {/* Sidebar */}
-      <aside className="relative z-10 w-64 bg-slate-800/40 backdrop-blur-xl border-r border-slate-700/50 shadow-2xl p-6 flex flex-col justify-between">
-        <div className="space-y-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/25">
-              <Calendar className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-cyan-100">Scheduler</h2>
-              <p className="text-xs text-slate-400">Smart Classroom</p>
-            </div>
-          </div>
-          <nav className="space-y-2">
-            {navigationItems.map((item) => {
-              const IconComponent = item.icon
-              const isActive = activeNavItem === item.id
-              return (
-                <Link key={item.id} to={item.path} onClick={() => setActiveNavItem(item.id)}>
-                  <div
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group cursor-pointer ${
-                      isActive
-                        ? "bg-gradient-to-r from-cyan-600/30 to-blue-600/30 text-cyan-100 shadow-lg shadow-cyan-600/20 border border-cyan-500/30 backdrop-blur-sm"
-                        : "text-slate-300 hover:bg-slate-700/30 hover:text-cyan-200 backdrop-blur-sm border border-transparent hover:border-slate-600/30"
-                    }`}
-                  >
-                    <IconComponent
-                      className={`w-5 h-5 transition-all duration-300 ${isActive ? "text-cyan-300" : "text-slate-400 group-hover:text-cyan-400"} group-hover:scale-110`}
-                    />
-                    <span className={`font-medium transition-colors duration-300 ${isActive ? "text-cyan-100" : ""}`}>
-                      {item.label}
-                    </span>
-                  </div>
-                </Link>
-              )
-            })}
-          </nav>
-        </div>
-      </aside>
+      <div className="space-y-6">
+        {feedError && (
+          <Callout tone="destructive" title="Something went wrong">
+            {feedError}
+          </Callout>
+        )}
 
-      {/* Main Content */}
-      <main className="relative z-10 flex-1 overflow-auto p-8 space-y-8">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-3">
-            <h1 className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-cyan-300 via-blue-300 to-purple-300 bg-clip-text text-transparent leading-tight">
-              Notifications
-            </h1>
-            <p className="text-lg text-slate-300 max-w-2xl leading-relaxed">
-              Manage system-wide alerts, warnings, and informational messages for all users.
-            </p>
-          </div>
-          <Button
-            onClick={() => setShowForm(!showForm)}
-            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/25 hover:shadow-xl hover:shadow-cyan-600/30 transition-all duration-300 px-6 py-3 flex items-center gap-2 border border-cyan-500/30 backdrop-blur-sm hover:scale-105"
-          >
-            <Plus className="h-5 w-5" /> Add Notification
-          </Button>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Notifications" value={notifications.length} icon={Bell} loading={loading} />
+          <StatCard
+            label="Unread"
+            value={unreadCount}
+            icon={Bell}
+            tone={unreadCount > 0 ? "warning" : "default"}
+            loading={loading}
+          />
+          <StatCard
+            label="Queries awaiting a reply"
+            value={openQueryCount}
+            icon={MessageSquare}
+            tone={openQueryCount > 0 ? "destructive" : "success"}
+            loading={queriesLoading}
+          />
         </div>
 
         {showForm && (
-          <Card className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 shadow-2xl shadow-cyan-500/10">
-            <CardHeader className="border-b border-slate-700/50 p-6">
-              <CardTitle className="text-xl font-semibold text-cyan-100">Create New Notification</CardTitle>
-              <CardDescription className="text-slate-400">This will be broadcasted to users.</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6">
-              <form onSubmit={handleSubmitNotification} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-slate-300 font-medium">Type</Label>
-                    <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-                      <SelectTrigger className="mt-1 bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 text-slate-200 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800/90 backdrop-blur-xl border-slate-600/50 text-slate-200">
-                        <SelectItem value="info" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Info</SelectItem>
-                        <SelectItem value="success" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Success</SelectItem>
-                        <SelectItem value="warning" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Warning</SelectItem>
-                        <SelectItem value="error" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Error</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-slate-300 font-medium">Priority</Label>
-                    <Select value={formData.priority} onValueChange={(value) => setFormData({ ...formData, priority: value })}>
-                      <SelectTrigger className="mt-1 bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 text-slate-200 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800/90 backdrop-blur-xl border-slate-600/50 text-slate-200">
-                        <SelectItem value="low" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Low</SelectItem>
-                        <SelectItem value="medium" className="hover:bg-slate-700/50 focus:bg-slate-700/50">Medium</SelectItem>
-                        <SelectItem value="high" className="hover:bg-slate-700/50 focus:bg-slate-700/50">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+          <SectionCard
+            title="Create a notification"
+            description="This is broadcast to every portal that is an audience for it."
+            icon={Plus}
+            className="animate-in fade-in duration-200"
+          >
+            <form onSubmit={handleSubmitNotification} className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="notification-type">Type</Label>
+                  <Select
+                    value={formData.type}
+                    onValueChange={(value) => setFormData({ ...formData, type: value })}
+                  >
+                    <SelectTrigger id="notification-type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="success">Success</SelectItem>
+                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="error">Error</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div>
-                  <Label className="text-slate-300 font-medium">Title</Label>
-                  <Input value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required className="mt-1 bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 focus:ring-cyan-500/20 text-slate-200 placeholder-slate-500 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70" />
+                <div className="space-y-2">
+                  <Label htmlFor="notification-priority">Priority</Label>
+                  <Select
+                    value={formData.priority}
+                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
+                  >
+                    <SelectTrigger id="notification-priority" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div>
-                  <Label className="text-slate-300 font-medium">Message</Label>
-                  <Textarea value={formData.message} onChange={(e) => setFormData({ ...formData, message: e.target.value })} required className="mt-1 bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 focus:ring-cyan-500/20 text-slate-200 placeholder-slate-500 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70" />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <Button type="submit" disabled={formLoading} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/25 transition-all duration-300 border border-cyan-500/30 backdrop-blur-sm">{formLoading ? "Sending..." : "Send Notification"}</Button>
-                  <Button type="button" variant="outline" onClick={() => setShowForm(false)} className="bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 border border-slate-600/50 hover:border-slate-500/70 backdrop-blur-sm transition-all duration-300">Cancel</Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notification-title">Title</Label>
+                <Input
+                  id="notification-title"
+                  value={formData.title}
+                  onChange={(event) => setFormData({ ...formData, title: event.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notification-message">Message</Label>
+                <Textarea
+                  id="notification-message"
+                  value={formData.message}
+                  onChange={(event) => setFormData({ ...formData, message: event.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Button type="submit" disabled={formLoading}>
+                  {formLoading ? "Sending..." : "Send notification"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </SectionCard>
         )}
 
-        <Card className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 shadow-2xl shadow-cyan-500/10">
-          <CardHeader className="border-b border-slate-700/50 p-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-2">
-                <CardTitle className="flex items-center gap-3 text-xl font-semibold text-cyan-100">
-                  <div className="p-2 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-xl border border-cyan-400/30 backdrop-blur-sm">
-                    <Bell className="h-5 w-5 text-cyan-300" />
-                  </div>
-                  Notification Feed
-                </CardTitle>
-                <CardDescription className="text-slate-400">
-                  {notifications.length} total notifications. {unreadCount} unread.
-                </CardDescription>
-              </div>
-              <Button variant="outline" size="sm" onClick={handleMarkAllRead} disabled={unreadCount === 0} className="bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 border border-slate-600/50 hover:border-slate-500/70 backdrop-blur-sm transition-all duration-300">
-                Mark All as Read
-              </Button>
+        <SectionCard
+          title="Notification feed"
+          description={`${notifications.length} total. ${unreadCount} unread.`}
+          icon={Bell}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleMarkAllRead}
+              disabled={unreadCount === 0}
+            >
+              Mark all as read
+            </Button>
+          }
+        >
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, index) => (
+                <Skeleton key={index} className="h-20 w-full rounded-lg" />
+              ))}
             </div>
-          </CardHeader>
-          <CardContent className="p-6">
-            {loading ? <p className="text-center text-slate-400 py-10">Loading notifications...</p> : notifications.length === 0 ? (
-              <div className="text-center py-10">
-                <Bell className="mx-auto h-12 w-12 text-slate-600" />
-                <h3 className="mt-2 text-sm font-medium text-slate-300">All caught up!</h3>
-                <p className="mt-1 text-sm text-slate-500">There are no new notifications.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {notifications.map((n) => (
-                  <div key={n._id} className={`p-4 rounded-lg border flex items-start justify-between gap-4 transition-all duration-300 backdrop-blur-sm ${getNotificationColor(n.type, n.isRead)}`}>
-                    <div className="flex items-start gap-4 flex-1">
-                      <div className="mt-1 flex-shrink-0">{getNotificationIcon(n.type)}</div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className={`font-semibold ${n.isRead ? "text-slate-400" : "text-slate-100"}`}>{n.title}</p>
-                          <Badge variant="outline" className={`${getPriorityBadgeClass(n.priority)} capitalize`}>{n.priority}</Badge>
+          ) : notifications.length === 0 ? (
+            <EmptyState
+              icon={Bell}
+              title="All caught up"
+              description="There are no notifications right now."
+            />
+          ) : (
+            <div className="space-y-3">
+              {notifications.map((notification) => {
+                const tone = toneFor(notification.type);
+                const ToneIcon = tone.icon;
+                return (
+                  <div
+                    key={notification._id}
+                    className={cn(
+                      "flex animate-in items-start justify-between gap-4 rounded-lg border border-border border-l-2 bg-card p-4 transition-colors fade-in duration-150",
+                      notification.isRead ? "border-l-border opacity-80" : tone.accent
+                    )}
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div
+                        className={cn(
+                          "mt-0.5 shrink-0",
+                          notification.isRead ? "text-muted-foreground" : "text-foreground"
+                        )}
+                      >
+                        <ToneIcon className="size-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <p
+                            className={cn(
+                              "font-medium",
+                              notification.isRead ? "text-muted-foreground" : "text-foreground"
+                            )}
+                          >
+                            {notification.title}
+                          </p>
+                          <StatusBadge
+                            variant={PRIORITY_VARIANTS[notification.priority] || "neutral"}
+                            className="capitalize"
+                          >
+                            {notification.priority}
+                          </StatusBadge>
+                          {!notification.isRead && (
+                            <StatusBadge variant="info">New</StatusBadge>
+                          )}
                         </div>
-                        <p className="text-sm text-slate-400">{n.message}</p>
-                        <p className="text-xs text-slate-500 mt-2">{new Date(n.createdAt).toLocaleString()}</p>
+                        <p className="text-sm text-muted-foreground">{notification.message}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {notification.createdAt
+                            ? new Date(notification.createdAt).toLocaleString()
+                            : ""}
+                        </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {!n.isRead && (
-                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-green-400 hover:bg-green-500/10" onClick={() => handleMarkAsRead(n._id)}>
-                          <Check className="h-4 w-4" />
+
+                    <div className="flex shrink-0 items-center gap-1">
+                      {!notification.isRead && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label="Mark as read"
+                          onClick={() => handleMarkAsRead(notification._id)}
+                        >
+                          <Check className="size-4" />
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-red-400 hover:bg-red-500/10" onClick={() => setNotificationToDelete(n)}>
-                        <Trash2 className="h-4 w-4" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label="Delete notification"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setNotificationToDelete(notification)}
+                      >
+                        <Trash2 className="size-4" />
                       </Button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
 
         {/* Queries raised by faculty and students. Answering one is the only
             way a query leaves status "open" — PUT /api/queries/:id/reply had
             no caller before this. The reply notification goes to the author
             alone (recipientUserId, no role audience), so no other faculty
             member or student ever reads the subject or the answer. */}
-        <Card className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 shadow-2xl shadow-cyan-500/10">
-          <CardHeader className="border-b border-slate-700/50 p-6">
-            <div className="space-y-2">
-              <CardTitle className="flex items-center gap-3 text-xl font-semibold text-cyan-100">
-                <div className="p-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl border border-purple-400/30 backdrop-blur-sm">
-                  <MessageSquare className="h-5 w-5 text-purple-300" />
-                </div>
-                Queries
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                {queries.length} total. {openQueryCount} awaiting a reply.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="p-6">
+        <SectionCard
+          title="Queries"
+          description={`${queries.length} total. ${openQueryCount} awaiting a reply.`}
+          icon={MessageSquare}
+        >
+          <div className="space-y-4">
             {queriesError && (
-              <p className="mb-4 text-sm text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg p-3">
+              <Callout tone="destructive" title="Something went wrong">
                 {queriesError}
-              </p>
+              </Callout>
             )}
+
             {queriesLoading ? (
-              <p className="text-center text-slate-400 py-10">Loading queries...</p>
-            ) : queries.length === 0 ? (
-              <div className="text-center py-10">
-                <MessageSquare className="mx-auto h-12 w-12 text-slate-600" />
-                <h3 className="mt-2 text-sm font-medium text-slate-300">No queries raised</h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Faculty and students can raise a query from their portal.
-                </p>
+              <div className="space-y-3">
+                {[...Array(2)].map((_, index) => (
+                  <Skeleton key={index} className="h-24 w-full rounded-lg" />
+                ))}
               </div>
+            ) : queries.length === 0 ? (
+              <EmptyState
+                icon={MessageSquare}
+                title="No queries raised"
+                description="Faculty and students can raise a query from their portal."
+              />
             ) : (
               <div className="space-y-4">
-                {queries.map((q) => {
-                  const answered = q.status === "answered"
+                {queries.map((query) => {
+                  const answered = query.status === "answered";
                   return (
                     <div
-                      key={q._id}
-                      className={`p-4 rounded-lg border backdrop-blur-sm transition-all duration-300 ${
-                        answered
-                          ? "bg-slate-800/40 border-slate-700/50"
-                          : "bg-purple-500/10 border-purple-400/30 border-l-4 border-l-purple-400"
-                      }`}
+                      key={query._id}
+                      className={cn(
+                        "animate-in rounded-lg border border-border border-l-2 bg-card p-4 transition-colors fade-in duration-150",
+                        answered ? "border-l-border opacity-80" : "border-l-primary"
+                      )}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <p className={`font-semibold ${answered ? "text-slate-400" : "text-slate-100"}`}>
-                              {q.subject}
-                            </p>
-                            <Badge variant="outline" className="bg-slate-600/20 text-slate-300 border-slate-500/30 capitalize">
-                              {q.role}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className={
-                                answered
-                                  ? "bg-green-500/20 text-green-300 border-green-500/30 capitalize"
-                                  : "bg-yellow-500/20 text-yellow-300 border-yellow-500/30 capitalize"
-                              }
-                            >
-                              {q.status}
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-slate-400">{q.message}</p>
-                          <p className="text-xs text-slate-500 mt-2">
-                            {q.name} &middot; {q.createdAt ? new Date(q.createdAt).toLocaleString() : ""}
-                          </p>
-                        </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p
+                          className={cn(
+                            "font-medium",
+                            answered ? "text-muted-foreground" : "text-foreground"
+                          )}
+                        >
+                          {query.subject}
+                        </p>
+                        <StatusBadge variant="neutral" className="capitalize">
+                          {query.role}
+                        </StatusBadge>
+                        <StatusBadge
+                          variant={answered ? "success" : "warning"}
+                          className="capitalize"
+                        >
+                          {query.status}
+                        </StatusBadge>
                       </div>
 
+                      <p className="mt-1 text-sm text-muted-foreground">{query.message}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {query.name}
+                        {query.createdAt
+                          ? ` · ${new Date(query.createdAt).toLocaleString()}`
+                          : ""}
+                      </p>
+
                       {answered ? (
-                        <div className="mt-3 rounded-md border border-slate-700 bg-slate-900/50 p-3">
-                          <p className="text-xs font-medium text-slate-400 mb-1">Your reply</p>
-                          <p className="text-sm text-slate-300">{q.reply}</p>
+                        <div className="mt-3 rounded-md border border-border bg-muted/40 p-3">
+                          <p className="mb-1 text-xs font-medium text-muted-foreground">
+                            Your reply
+                          </p>
+                          <p className="text-sm text-foreground">{query.reply}</p>
                         </div>
                       ) : (
                         <div className="mt-3 space-y-2">
-                          <Label className="text-slate-300 font-medium">Reply</Label>
+                          <Label htmlFor={`reply-${query._id}`}>Reply</Label>
                           <Textarea
-                            value={replyDrafts[q._id] || ""}
-                            onChange={(e) =>
-                              setReplyDrafts((prev) => ({ ...prev, [q._id]: e.target.value }))
+                            id={`reply-${query._id}`}
+                            value={replyDrafts[query._id] || ""}
+                            onChange={(event) =>
+                              setReplyDrafts((prev) => ({
+                                ...prev,
+                                [query._id]: event.target.value,
+                              }))
                             }
                             placeholder="Write your answer to this query..."
-                            className="bg-slate-800/50 border-slate-600/50 focus:border-cyan-500 focus:ring-cyan-500/20 text-slate-200 placeholder-slate-500 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/70"
                           />
                           <Button
                             size="sm"
-                            onClick={() => handleReply(q._id)}
-                            disabled={replyingId === q._id || !(replyDrafts[q._id] || "").trim()}
-                            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-600/25 transition-all duration-300 border border-cyan-500/30 backdrop-blur-sm flex items-center gap-2"
+                            onClick={() => handleReply(query._id)}
+                            disabled={
+                              replyingId === query._id ||
+                              !(replyDrafts[query._id] || "").trim()
+                            }
                           >
-                            <Send className="h-4 w-4" />
-                            {replyingId === q._id ? "Sending..." : "Send Reply"}
+                            <Send className="size-4" />
+                            {replyingId === query._id ? "Sending..." : "Send reply"}
                           </Button>
                         </div>
                       )}
                     </div>
-                  )
+                  );
                 })}
               </div>
             )}
-          </CardContent>
-        </Card>
-      </main>
+          </div>
+        </SectionCard>
+      </div>
 
-      {notificationToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <Card className="w-full max-w-md shadow-2xl bg-slate-800/80 backdrop-blur-xl border border-slate-700/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-400">
-                <AlertTriangle className="h-5 w-5" />
-                Confirm Deletion
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                Are you sure you want to delete this notification? This action cannot be undone.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm font-medium bg-slate-900/50 p-3 rounded-md border border-slate-700">
-                <p className="font-bold text-slate-200">{notificationToDelete.title}</p>
-                <p className="text-slate-400 mt-1">{notificationToDelete.message}</p>
-              </div>
-            </CardContent>
-            <CardFooter className="flex justify-end gap-2 bg-slate-900/50 p-4 rounded-b-lg">
-              <Button variant="outline" onClick={() => setNotificationToDelete(null)} className="bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 border border-slate-600/50 hover:border-slate-500/70 backdrop-blur-sm transition-all duration-300">
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={confirmDeleteNotification}
-                className="bg-gradient-to-r from-red-600 to-rose-600 text-white hover:from-red-700 hover:to-rose-700 border-0"
-              >
-                Delete Notification
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
-    </div>
-  )
+      <ConfirmDialog
+        open={Boolean(notificationToDelete)}
+        onOpenChange={(open) => {
+          if (!open) setNotificationToDelete(null);
+        }}
+        title="Delete this notification?"
+        description={
+          notificationToDelete
+            ? `"${notificationToDelete.title}" will be removed for everyone. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete notification"
+        destructive
+        loading={deleting}
+        onConfirm={confirmDeleteNotification}
+      />
+    </AppShell>
+  );
 }

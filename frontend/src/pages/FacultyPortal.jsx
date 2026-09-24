@@ -1,39 +1,63 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard,
-  CalendarDays,
-  BookOpen,
   Bell,
-  User,
+  BookOpen,
+  Building2,
+  CalendarDays,
   Clock,
+  DoorOpen,
   GraduationCap,
   Mail,
-  Building2,
-  DoorOpen,
   MessageSquare,
   Send,
   ShieldAlert,
+  User,
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+
+import api from "@/lib/api";
 import { AppShell, PageHeader } from "@/components/AppShell";
+import { navForRole } from "@/lib/nav";
+import { weekStrip } from "@/lib/schedule";
+import { useIdentity } from "@/hooks/useIdentity";
+import { useSystemConfig } from "@/hooks/useSystemConfig";
+import { WeekStrip } from "@/components/timetable/WeekStrip";
+import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { SectionCard } from "@/components/common/SectionCard";
+import { StatCard } from "@/components/common/StatCard";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Callout } from "@/components/common/Callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { SectionCard } from "@/components/common/SectionCard";
-import { StatCard } from "@/components/common/StatCard";
-import { EmptyState } from "@/components/common/EmptyState";
-import { useIdentity } from "@/hooks/useIdentity";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
+/*
+  /faculty-portal — the faculty dashboard (UI_REPLICATION_PLAN U9).
+
+  The shell, the navigation, the theme toggle and logout all come from
+  `AppShell` + `navForRole("faculty")`; this file owns no chrome of its own.
+
+  DATA SCOPING (unchanged by the re-skin, and the whole point of this page):
+    - Identity comes from `useIdentity()` (GET /api/auth/me) — never from an
+      inline localStorage read.
+    - `linked === false` renders "Profile not linked — contact your
+      administrator" instead of anybody's data.
+    - Schedule entries are filtered client-side by this user's own
+      `facultyId`, on top of the server's role scoping of GET /timetables.
+    - There are deliberately NO fallbacks: no assumed department, no default
+      semester/academic year, no invented email, no "render another cohort's
+      timetable when ours is empty", and no "the whole course catalogue is
+      my course list". Empty stays empty.
+*/
+
+const TAB_IDS = ["schedule", "courses", "queries", "analytics", "notifications"];
+
+const WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "long" });
 
 /** "09:00" -> 540. Returns null for anything unparseable. */
 function toMinutes(value) {
@@ -59,6 +83,37 @@ function roundHours(hours) {
   return Math.round(hours * 10) / 10;
 }
 
+/** `Map<id, doc>` keyed the way `lib/schedule.js#resolveEntry` reads it. */
+function toIdMap(list) {
+  const map = new Map();
+  for (const item of list || []) {
+    const id = item?._id ?? item?.id;
+    if (id != null) map.set(String(id), item);
+  }
+  return map;
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function readTabFromHash() {
+  try {
+    const hash = String(window.location.hash || "").replace("#", "");
+    return TAB_IDS.includes(hash) ? hash : TAB_IDS[0];
+  } catch {
+    return TAB_IDS[0];
+  }
+}
+
 export default function FacultyPortal() {
   const navigate = useNavigate();
 
@@ -74,6 +129,10 @@ export default function FacultyPortal() {
     error: identityError,
   } = useIdentity();
 
+  // The scheduling grid is server-owned (GET /api/config/grid); days and
+  // slots are never hardcoded here.
+  const { grid } = useSystemConfig();
+
   const [timetables, setTimetables] = useState([]);
   const [courses, setCourses] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -81,6 +140,9 @@ export default function FacultyPortal() {
   const [queries, setQueries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
+  const [tab, setTab] = useState(readTabFromHash);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   const [querySubject, setQuerySubject] = useState("");
   const [queryMessage, setQueryMessage] = useState("");
@@ -206,7 +268,9 @@ export default function FacultyPortal() {
   }, [timetables, facultyId]);
 
   // --------------------------------------------------
-  // Faculty courses — derived from the faculty's own entries
+  // Faculty courses — derived from the faculty's own entries.
+  // Never the full /courses list: that list is fetched only to resolve
+  // the course ids that appear in this faculty member's own entries.
   // --------------------------------------------------
 
   const facultyCourses = useMemo(() => {
@@ -216,6 +280,22 @@ export default function FacultyPortal() {
 
     return courses.filter((course) => ids.has(String(course._id)));
   }, [facultySchedule, courses]);
+
+  // Lookup maps for the shared timetable components. `faculty` holds only
+  // the signed-in member's own record — every entry on this page is theirs.
+  const maps = useMemo(
+    () => ({
+      courses: toIdMap(courses),
+      rooms: toIdMap(rooms),
+      faculty: toIdMap(faculty ? [faculty] : []),
+    }),
+    [courses, rooms, faculty]
+  );
+
+  const strip = useMemo(
+    () => weekStrip(facultySchedule, { weekOffset, grid }),
+    [facultySchedule, weekOffset, grid]
+  );
 
   // --------------------------------------------------
   // Analytics — all of it computed from the faculty's real entries
@@ -227,9 +307,21 @@ export default function FacultyPortal() {
       0
     );
 
-    const perDay = DAYS.map((day) => ({
+    // Days come from the server grid; any day that shows up in the user's
+    // own entries but not in the grid is appended so nothing is hidden.
+    const dayNames = [...(grid?.days || [])];
+    for (const entry of facultySchedule) {
+      const day = String(entry.day || "").trim();
+      if (day && !dayNames.some((name) => name.toLowerCase() === day.toLowerCase())) {
+        dayNames.push(day);
+      }
+    }
+
+    const perDay = dayNames.map((day) => ({
       day,
-      sessions: facultySchedule.filter((entry) => entry.day === day).length,
+      sessions: facultySchedule.filter(
+        (entry) => String(entry.day || "").toLowerCase() === day.toLowerCase()
+      ).length,
     }));
 
     const teachingDays = perDay.filter((row) => row.sessions > 0).length;
@@ -238,7 +330,7 @@ export default function FacultyPortal() {
       { day: null, sessions: 0 }
     );
 
-    const rooms = new Set(
+    const usedRooms = new Set(
       facultySchedule
         .map((entry) => String(entry.roomId || ""))
         .filter((roomId) => roomId !== "")
@@ -259,13 +351,13 @@ export default function FacultyPortal() {
       sessionsPerDay: teachingDays
         ? roundHours(facultySchedule.length / teachingDays)
         : 0,
-      roomsUsed: rooms.size,
+      roomsUsed: usedRooms.size,
       maxSessionsInADay: perDay.reduce(
         (max, row) => Math.max(max, row.sessions),
         0
       ),
     };
-  }, [facultySchedule, faculty]);
+  }, [facultySchedule, faculty, grid]);
 
   // Entries store roomId as a plain string; resolve it against the rooms
   // list rather than printing the raw ObjectId.
@@ -276,6 +368,29 @@ export default function FacultyPortal() {
     const room = rooms.find((item) => String(item._id || item.id) === roomId);
     return room?.name || roomId;
   };
+
+  const courseNameFor = (entry) => {
+    const courseId = String(entry?.courseId || "");
+    const course = courses.find(
+      (item) => String(item._id || item.id) === courseId
+    );
+    return course?.name || courseId || "Course";
+  };
+
+  const todayName = WEEKDAY_FORMAT.format(new Date());
+
+  const todayClasses = useMemo(
+    () =>
+      facultySchedule
+        .filter(
+          (entry) =>
+            String(entry.day || "").toLowerCase() === todayName.toLowerCase()
+        )
+        .sort((a, b) =>
+          String(a.startTime).localeCompare(String(b.startTime))
+        ),
+    [facultySchedule, todayName]
+  );
 
   const totalWeeklyClasses = facultySchedule.length;
 
@@ -324,45 +439,41 @@ export default function FacultyPortal() {
     }
   };
 
+  const handleTabChange = (value) => {
+    setTab(value);
+    try {
+      window.history.replaceState(null, "", `#${value}`);
+    } catch {
+      /* history unavailable */
+    }
+  };
+
   // --------------------------------------------------
-  // Navigation
+  // Shell (navigation is shared — see lib/nav.js)
   // --------------------------------------------------
 
-  const navigationItems = [
-    {
-      id: "dashboard",
-      label: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/faculty-portal",
-    },
-    {
-      id: "timetable",
-      label: "My Timetable",
-      icon: CalendarDays,
-      path: "/faculty-portal/timetable",
-    },
-    {
-      id: "courses",
-      label: "My Courses",
-      icon: BookOpen,
-      path: "/faculty-portal/courses",
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      path: "/faculty-portal/notifications",
-      badge: unreadNotifications,
-    },
-    {
-      id: "profile",
-      label: "Profile",
-      icon: User,
-      path: "/faculty-portal/profile",
-    },
-  ];
+  const { brand, nav, quickActions } = navForRole("faculty");
 
-  const brand = { title: "SmartSchedAI", subtitle: "Faculty portal" };
+  const shellNav = useMemo(
+    () =>
+      nav.map((item) =>
+        item.badgeKey === "unread"
+          ? { ...item, badge: unreadNotifications }
+          : item
+      ),
+    [nav, unreadNotifications]
+  );
+
+  const shellProps = {
+    brand,
+    nav: shellNav,
+    quickActions,
+    header: {
+      notifications: unreadNotifications,
+      onNotificationsClick: () => navigate("/faculty-portal/notifications"),
+    },
+    onLogout: handleLogout,
+  };
 
   // --------------------------------------------------
   // Loading screen
@@ -370,20 +481,19 @@ export default function FacultyPortal() {
 
   if (identityLoading || loading) {
     return (
-      <AppShell brand={brand} nav={navigationItems} onLogout={handleLogout}>
+      <AppShell {...shellProps}>
         <div className="space-y-6">
-          <div className="h-9 w-64 animate-pulse rounded-md bg-muted" />
+          <Skeleton className="h-9 w-64" />
+
+          <Skeleton className="h-32 w-full" />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[...Array(4)].map((_, index) => (
-              <div
-                key={index}
-                className="h-24 animate-pulse rounded-md bg-muted"
-              />
+              <Skeleton key={index} className="h-24" />
             ))}
           </div>
 
-          <div className="h-64 animate-pulse rounded-md bg-muted" />
+          <Skeleton className="h-64 w-full" />
         </div>
       </AppShell>
     );
@@ -395,85 +505,44 @@ export default function FacultyPortal() {
 
   if (!user) {
     return (
-      <AppShell brand={brand} nav={navigationItems} onLogout={handleLogout}>
+      <AppShell {...shellProps}>
         <div className="flex min-h-[60vh] items-center justify-center">
-          <div className="max-w-md text-center">
-            <User className="mx-auto mb-4 size-10 text-muted-foreground" />
-
-            <h1 className="text-xl font-semibold text-foreground">
-              You are not signed in
-            </h1>
-
-            <p className="mt-2 text-sm text-muted-foreground">
-              {identityError || "Sign in again to open your faculty portal."}
-            </p>
-
-            <Button onClick={handleLogout} className="mt-6">
-              Return to Login
-            </Button>
-          </div>
+          <EmptyState
+            icon={User}
+            title="You are not signed in"
+            description={
+              identityError || "Sign in again to open your faculty portal."
+            }
+            action={<Button onClick={handleLogout}>Return to Login</Button>}
+          />
         </div>
       </AppShell>
     );
   }
 
   // --------------------------------------------------
-  // Signed in, but the account points at no Faculty record
+  // Signed in, but the account points at no Faculty record.
+  // Say so — never fall back to somebody else's data.
   // --------------------------------------------------
 
   if (!linked) {
     return (
-      <AppShell brand={brand} nav={navigationItems} onLogout={handleLogout}>
+      <AppShell {...shellProps}>
         <div className="flex min-h-[60vh] items-center justify-center">
-          <div className="max-w-md text-center">
-            <ShieldAlert className="mx-auto mb-4 size-10 text-muted-foreground" />
-
-            <h1 className="text-xl font-semibold text-foreground">
-              Profile not linked — contact your administrator
-            </h1>
-
-            <p className="mt-2 text-sm text-muted-foreground">
-              Your account ({user.email || "this user"}) is not linked to a
-              faculty record, so there is no schedule to show.
-            </p>
-
-            <Button onClick={handleLogout} className="mt-6">
-              Return to Login
-            </Button>
-          </div>
+          <EmptyState
+            icon={ShieldAlert}
+            title="Profile not linked — contact your administrator"
+            description={`Your account (${
+              user.email || "this user"
+            }) is not linked to a faculty record, so there is no schedule to show.`}
+            action={<Button onClick={handleLogout}>Return to Login</Button>}
+          />
         </div>
       </AppShell>
     );
   }
 
   const displayName = faculty?.name || user.name || "Faculty";
-
-  const stats = [
-    {
-      id: "courses",
-      label: "My Courses",
-      value: facultyCourses.length,
-      icon: BookOpen,
-    },
-    {
-      id: "classes",
-      label: "Weekly Classes",
-      value: totalWeeklyClasses,
-      icon: CalendarDays,
-    },
-    {
-      id: "hours",
-      label: "Weekly Hours",
-      value: analytics.weeklyHours,
-      icon: Clock,
-    },
-    {
-      id: "alerts",
-      label: "Notifications",
-      value: unreadNotifications,
-      icon: Bell,
-    },
-  ];
 
   const facts = [
     { id: "name", label: "Name", value: displayName, icon: User },
@@ -500,162 +569,452 @@ export default function FacultyPortal() {
   ];
 
   return (
-    <AppShell brand={brand} nav={navigationItems} onLogout={handleLogout}>
+    <AppShell {...shellProps}>
       <PageHeader
         title="Faculty Dashboard"
         description={`Welcome back, ${displayName}`}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/faculty-portal/timetable">Open my timetable</Link>
+          </Button>
+        }
       />
 
       {loadError ? (
-        <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
-          <p className="text-sm font-medium text-destructive">
-            Unable to load your dashboard
-          </p>
-
-          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+        <div className="mb-6">
+          <Callout
+            tone="destructive"
+            title="Unable to load your dashboard"
+            icon={ShieldAlert}
+          >
+            {loadError}
+          </Callout>
         </div>
       ) : null}
+
+      {/* ==================================================
+          WEEK AT A GLANCE — this faculty member's own entries
+      ================================================== */}
+
+      <WeekStrip
+        days={strip}
+        weekOffset={weekOffset}
+        onPrev={() => setWeekOffset((current) => current - 1)}
+        onNext={() => setWeekOffset((current) => current + 1)}
+        onToday={() => setWeekOffset(0)}
+        maps={maps}
+      />
 
       {/* ==================================================
           STAT CARDS
       ================================================== */}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => {
-          const IconComponent = stat.icon;
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="My Courses" value={facultyCourses.length} icon={BookOpen} />
 
-          return (
-            <div
-              key={stat.id}
-              className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">
-                    {stat.label}
-                  </p>
+        <StatCard
+          label="Weekly Classes"
+          value={totalWeeklyClasses}
+          icon={CalendarDays}
+          delta={todayClasses.length ? `${todayClasses.length}` : undefined}
+          deltaLabel={todayClasses.length ? `today (${todayName})` : undefined}
+        />
 
-                  <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
-                    {stat.value}
-                  </p>
-                </div>
+        <StatCard
+          label="Weekly Hours"
+          value={
+            analytics.maxHours
+              ? `${analytics.weeklyHours} / ${analytics.maxHours}`
+              : analytics.weeklyHours
+          }
+          icon={Clock}
+          tone={
+            analytics.loadPercent !== null && analytics.loadPercent >= 100
+              ? "warning"
+              : "default"
+          }
+          delta={
+            analytics.loadPercent !== null
+              ? `${analytics.loadPercent}%`
+              : undefined
+          }
+          deltaLabel={
+            analytics.loadPercent !== null ? "of max hours/week" : undefined
+          }
+        />
 
-                <IconComponent className="size-4 shrink-0 text-muted-foreground" />
-              </div>
-            </div>
-          );
-        })}
+        <StatCard
+          label="Notifications"
+          value={unreadNotifications}
+          icon={Bell}
+          href="/faculty-portal/notifications"
+        />
       </div>
 
       {/* ==================================================
-          TEACHING ANALYTICS (real entries only)
+          TABS
       ================================================== */}
 
-      <div className="mt-6">
-        <SectionCard
-          title="Teaching Analytics"
-          description="Computed from your own published timetable entries"
-          icon={Clock}
-        >
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              label="Weekly Teaching Hours"
-              value={
-                analytics.maxHours
-                  ? `${analytics.weeklyHours} / ${analytics.maxHours}`
-                  : analytics.weeklyHours
-              }
-              icon={Clock}
-              tone={
-                analytics.loadPercent !== null && analytics.loadPercent > 100
-                  ? "destructive"
-                  : "default"
-              }
-              delta={
-                analytics.loadPercent !== null
-                  ? `${analytics.loadPercent}%`
-                  : undefined
-              }
-              deltaLabel={
-                analytics.loadPercent !== null ? "of max hours/week" : undefined
-              }
-            />
+      <Tabs value={tab} onValueChange={handleTabChange} className="mt-6 gap-4">
+        <TabsList variant="underline" className="w-full overflow-x-auto">
+          <TabsTrigger value="schedule">My Schedule</TabsTrigger>
+          <TabsTrigger value="courses">My Courses</TabsTrigger>
+          <TabsTrigger value="queries">Queries</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+        </TabsList>
 
-            <StatCard
-              label="Sessions per Teaching Day"
-              value={analytics.sessionsPerDay}
-              icon={CalendarDays}
-              delta={
-                analytics.busiestDay
-                  ? `${analytics.busiestDay.sessions}`
-                  : undefined
-              }
-              deltaLabel={
-                analytics.busiestDay
-                  ? `peak on ${analytics.busiestDay.day}`
-                  : undefined
-              }
-            />
+        {/* ---------------- My Schedule ---------------- */}
 
-            <StatCard
-              label="Rooms Used"
-              value={analytics.roomsUsed}
-              icon={DoorOpen}
-            />
+        <TabsContent value="schedule" className="animate-in fade-in duration-150">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="xl:col-span-1">
+              <SectionCard
+                title={`Today — ${todayName}`}
+                description="Your classes for today"
+                icon={CalendarDays}
+              >
+                {todayClasses.length === 0 ? (
+                  <EmptyState
+                    icon={CalendarDays}
+                    title="Nothing scheduled today"
+                    description="You have no classes assigned for today."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {todayClasses.map((entry, index) => (
+                      <div
+                        key={`${entry.courseId}-${entry.startTime}-${index}`}
+                        className="rounded-md border border-border p-3 transition-colors duration-150 hover:bg-accent"
+                      >
+                        <p className="text-sm font-medium text-foreground">
+                          {courseNameFor(entry)}
+                        </p>
+
+                        <p className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                          {entry.startTime} - {entry.endTime}
+                        </p>
+
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {roomNameFor(entry)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+
+            <div className="xl:col-span-2">
+              <SectionCard
+                title="My Schedule"
+                description="Every class assigned to you across your published timetables"
+                icon={Clock}
+                actions={
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/faculty-portal/timetable">Grid view</Link>
+                  </Button>
+                }
+              >
+                {facultySchedule.length === 0 ? (
+                  <EmptyState
+                    icon={CalendarDays}
+                    title="No classes scheduled"
+                    description="Your timetable doesn't contain any assigned classes yet."
+                  />
+                ) : (
+                  <TimetableListView
+                    schedule={facultySchedule}
+                    grid={grid}
+                    maps={maps}
+                    groupBy="day"
+                  />
+                )}
+              </SectionCard>
+            </div>
           </div>
+        </TabsContent>
 
-          {facultySchedule.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No published classes are assigned to you yet, so there is nothing
-              to measure.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-2">
-              {analytics.perDay.map((row) => (
-                <div key={row.day} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 text-xs text-muted-foreground">
-                    {row.day}
-                  </span>
+        {/* ---------------- My Courses ---------------- */}
 
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+        <TabsContent value="courses" className="animate-in fade-in duration-150">
+          <SectionCard
+            title="My Courses"
+            description="Derived from your own timetable entries — not the course catalogue"
+            icon={BookOpen}
+          >
+            {facultyCourses.length === 0 ? (
+              <EmptyState
+                icon={BookOpen}
+                title="No courses assigned"
+                description="Courses appear here once a published timetable assigns one of them to you."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {facultyCourses.map((course) => {
+                  const sessions = facultySchedule.filter(
+                    (entry) =>
+                      String(entry.courseId || "") === String(course._id)
+                  ).length;
+
+                  return (
                     <div
-                      className="h-full rounded-full bg-primary"
-                      style={{
-                        width: `${
-                          analytics.maxSessionsInADay
-                            ? (row.sessions / analytics.maxSessionsInADay) * 100
-                            : 0
-                        }%`,
-                      }}
+                      key={course._id}
+                      className="rounded-lg border border-border bg-card p-4 transition-colors duration-150 hover:bg-accent"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">
+                          {course.name}
+                        </p>
+
+                        {course.type ? (
+                          <Badge variant="outline" className="capitalize">
+                            {course.type}
+                          </Badge>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-1 font-mono text-xs text-muted-foreground">
+                        {course.code || "—"}
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        {course.department ? (
+                          <span>{course.department}</span>
+                        ) : null}
+                        {course.semester ? (
+                          <span>Semester {course.semester}</span>
+                        ) : null}
+                        <span>
+                          {sessions} {sessions === 1 ? "session" : "sessions"} /
+                          week
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ---------------- Queries ----------------
+            Own queries only — the server scopes GET /api/queries to the
+            caller, and POST /api/queries takes the author from the token.
+        ------------------------------------------- */}
+
+        <TabsContent value="queries" className="animate-in fade-in duration-150">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="xl:col-span-1">
+              <SectionCard
+                title="Ask a Query"
+                description="Send a question to the administrator"
+                icon={MessageSquare}
+              >
+                <form onSubmit={handleQuerySubmit} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="query-subject">Subject</Label>
+
+                    <Input
+                      id="query-subject"
+                      value={querySubject}
+                      onChange={(event) => setQuerySubject(event.target.value)}
+                      placeholder="e.g. Clash on Tuesday 11:00"
+                      maxLength={120}
                     />
                   </div>
 
-                  <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {row.sessions} {row.sessions === 1 ? "class" : "classes"}
-                  </span>
-                </div>
-              ))}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="query-message">Message</Label>
+
+                    <Textarea
+                      id="query-message"
+                      value={queryMessage}
+                      onChange={(event) => setQueryMessage(event.target.value)}
+                      placeholder="Describe your question in a sentence or two."
+                      rows={4}
+                    />
+                  </div>
+
+                  {queryError ? (
+                    <p className="text-sm text-destructive">{queryError}</p>
+                  ) : null}
+
+                  {queryNotice ? (
+                    <p className="text-sm text-muted-foreground">
+                      {queryNotice}
+                    </p>
+                  ) : null}
+
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" disabled={querySubmitting}>
+                      <Send className="size-4" />
+                      {querySubmitting ? "Sending..." : "Send Query"}
+                    </Button>
+                  </div>
+                </form>
+              </SectionCard>
             </div>
-          )}
-        </SectionCard>
-      </div>
 
-      {/* ==================================================
-          FACULTY INFORMATION
-      ================================================== */}
+            <div className="xl:col-span-2">
+              <SectionCard
+                title="My Queries"
+                description="Questions you raised and the administrator's replies"
+                icon={MessageSquare}
+              >
+                {queries.length === 0 ? (
+                  <EmptyState
+                    icon={MessageSquare}
+                    title="No queries yet"
+                    description="Questions you raise appear here with the administrator's reply."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {queries.map((query) => (
+                      <div
+                        key={query._id}
+                        className="rounded-md border border-border p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-medium text-foreground">
+                            {query.subject}
+                          </p>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <section className="rounded-lg border border-border bg-card text-card-foreground shadow-sm">
-            <div className="border-b border-border p-4">
-              <h2>Faculty Information</h2>
+                          <Badge
+                            variant={
+                              query.status === "answered"
+                                ? "default"
+                                : "secondary"
+                            }
+                          >
+                            {query.status === "answered" ? "Answered" : "Open"}
+                          </Badge>
+                        </div>
 
-              <p className="mt-1 text-sm text-muted-foreground">
-                Your academic and professional details
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {query.message}
+                        </p>
+
+                        {query.reply ? (
+                          <p className="mt-2 rounded-md bg-muted p-2 text-sm text-foreground">
+                            <span className="font-medium">Admin: </span>
+                            {query.reply}
+                          </p>
+                        ) : null}
+
+                        {query.createdAt ? (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {formatDateTime(query.createdAt)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ---------------- Analytics ---------------- */}
+
+        <TabsContent
+          value="analytics"
+          className="animate-in fade-in space-y-6 duration-150"
+        >
+          <SectionCard
+            title="Teaching Analytics"
+            description="Computed from your own published timetable entries"
+            icon={Clock}
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <StatCard
+                label="Weekly Teaching Hours"
+                value={
+                  analytics.maxHours
+                    ? `${analytics.weeklyHours} / ${analytics.maxHours}`
+                    : analytics.weeklyHours
+                }
+                icon={Clock}
+                tone={
+                  analytics.loadPercent !== null && analytics.loadPercent >= 100
+                    ? "destructive"
+                    : "default"
+                }
+                delta={
+                  analytics.loadPercent !== null
+                    ? `${analytics.loadPercent}%`
+                    : undefined
+                }
+                deltaLabel={
+                  analytics.loadPercent !== null
+                    ? "of max hours/week"
+                    : undefined
+                }
+              />
+
+              <StatCard
+                label="Sessions per Teaching Day"
+                value={analytics.sessionsPerDay}
+                icon={CalendarDays}
+                delta={
+                  analytics.busiestDay
+                    ? `${analytics.busiestDay.sessions}`
+                    : undefined
+                }
+                deltaLabel={
+                  analytics.busiestDay
+                    ? `peak on ${analytics.busiestDay.day}`
+                    : undefined
+                }
+              />
+
+              <StatCard
+                label="Rooms Used"
+                value={analytics.roomsUsed}
+                icon={DoorOpen}
+              />
+            </div>
+
+            {facultySchedule.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                No published classes are assigned to you yet, so there is
+                nothing to measure.
               </p>
-            </div>
+            ) : (
+              <div className="mt-6 space-y-3">
+                {analytics.perDay.map((row) => (
+                  <div key={row.day} className="flex items-center gap-3">
+                    <span className="w-24 shrink-0 text-xs text-muted-foreground">
+                      {row.day}
+                    </span>
 
-            <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
+                    <Progress
+                      className="flex-1"
+                      value={
+                        analytics.maxSessionsInADay
+                          ? Math.round(
+                              (row.sessions / analytics.maxSessionsInADay) * 100
+                            )
+                          : 0
+                      }
+                    />
+
+                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                      {row.sessions} {row.sessions === 1 ? "class" : "classes"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Faculty Information"
+            description="Your academic and professional details"
+            icon={User}
+          >
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {facts.map((fact) => {
                 const IconComponent = fact.icon;
 
@@ -679,243 +1038,67 @@ export default function FacultyPortal() {
                 );
               })}
             </div>
-          </section>
-        </div>
+          </SectionCard>
+        </TabsContent>
 
-        {/* ==================================================
-            QUICK SUMMARY
-        ================================================== */}
+        {/* ---------------- Notifications ----------------
+            GET /api/notifications is audience-scoped server-side; this tab
+            only renders what came back for this user.
+        ------------------------------------------------ */}
 
-        <section className="rounded-lg border border-border bg-card text-card-foreground shadow-sm">
-          <div className="border-b border-border p-4">
-            <h2>My Courses</h2>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              Courses currently assigned to you
-            </p>
-          </div>
-
-          <div className="p-4">
-            {facultyCourses.length === 0 ? (
-              <div className="py-8 text-center">
-                <BookOpen className="mx-auto mb-3 size-8 text-muted-foreground" />
-
-                <p className="text-sm text-muted-foreground">
-                  No courses assigned yet.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {facultyCourses.slice(0, 5).map((course) => (
-                  <div
-                    key={course._id}
-                    className="rounded-md border border-border p-3 transition-colors duration-150 hover:bg-accent"
-                  >
-                    <p className="text-sm font-medium text-foreground">
-                      {course.name}
-                    </p>
-
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {course.code || "Course"}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-
-      {/* ==================================================
-          TODAY'S / UPCOMING SCHEDULE
-      ================================================== */}
-
-      <section className="mt-6 rounded-lg border border-border bg-card text-card-foreground shadow-sm">
-        <div className="flex items-center justify-between gap-4 border-b border-border p-4">
-          <div>
-            <h2>My Schedule</h2>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              Your assigned classes
-            </p>
-          </div>
-
-          <Button asChild variant="outline" size="sm">
-            <Link to="/faculty-portal/timetable">View Timetable</Link>
-          </Button>
-        </div>
-
-        <div className="p-4">
-          {facultySchedule.length === 0 ? (
-            <div className="py-12 text-center">
-              <CalendarDays className="mx-auto mb-4 size-10 text-muted-foreground" />
-
-              <h3 className="text-foreground">No Classes Scheduled</h3>
-
-              <p className="mt-1 text-sm text-muted-foreground">
-                Your timetable doesn't contain any assigned classes yet.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {facultySchedule.slice(0, 6).map((entry, index) => {
-                const course = courses.find(
-                  (item) =>
-                    String(item._id) ===
-                    String(entry.courseId)
-                );
-
-                return (
-                  <div
-                    key={`${entry.courseId}-${entry.day}-${entry.startTime}-${index}`}
-                    className="flex flex-col gap-3 rounded-md border border-border p-4 transition-colors duration-150 hover:bg-accent md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
-
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {course?.name || "Course"}
-                        </p>
-
-                        <p className="text-xs text-muted-foreground">
-                          {entry.day}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-6">
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          Time
-                        </p>
-
-                        <p className="font-mono text-xs tabular-nums text-foreground">
-                          {entry.startTime} - {entry.endTime}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          Room
-                        </p>
-
-                        <p className="text-sm text-foreground">
-                          {roomNameFor(entry)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ==================================================
-          ASK A QUERY  (own queries only — the server scopes
-          GET /api/queries to the caller)
-      ================================================== */}
-
-      <div className="mt-6">
-        <SectionCard
-          title="Ask a Query"
-          description="Send a question to the administrator and track their replies"
-          icon={MessageSquare}
+        <TabsContent
+          value="notifications"
+          className="animate-in fade-in duration-150"
         >
-          <form onSubmit={handleQuerySubmit} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="query-subject">Subject</Label>
-
-              <Input
-                id="query-subject"
-                value={querySubject}
-                onChange={(event) => setQuerySubject(event.target.value)}
-                placeholder="e.g. Clash on Tuesday 11:00"
-                maxLength={120}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="query-message">Message</Label>
-
-              <Textarea
-                id="query-message"
-                value={queryMessage}
-                onChange={(event) => setQueryMessage(event.target.value)}
-                placeholder="Describe your question in a sentence or two."
-                rows={3}
-              />
-            </div>
-
-            {queryError ? (
-              <p className="text-sm text-destructive">{queryError}</p>
-            ) : null}
-
-            {queryNotice ? (
-              <p className="text-sm text-muted-foreground">{queryNotice}</p>
-            ) : null}
-
-            <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={querySubmitting}>
-                <Send className="size-4" />
-                {querySubmitting ? "Sending..." : "Send Query"}
+          <SectionCard
+            title="Notifications"
+            description="Announcements addressed to you"
+            icon={Bell}
+            actions={
+              <Button asChild variant="outline" size="sm">
+                <Link to="/faculty-portal/notifications">Open all</Link>
               </Button>
-            </div>
-          </form>
-
-          <div className="mt-6 border-t border-border pt-4">
-            <p className="mb-3 text-sm font-medium text-foreground">
-              My Queries
-            </p>
-
-            {queries.length === 0 ? (
+            }
+          >
+            {notifications.length === 0 ? (
               <EmptyState
-                icon={MessageSquare}
-                title="No queries yet"
-                description="Questions you raise appear here with the administrator's reply."
+                icon={Bell}
+                title="No notifications"
+                description="Announcements addressed to faculty will appear here."
               />
             ) : (
               <div className="space-y-2">
-                {queries.map((query) => (
+                {notifications.slice(0, 10).map((notification) => (
                   <div
-                    key={query._id}
-                    className="rounded-md border border-border p-3"
+                    key={notification._id}
+                    className="rounded-md border border-border p-3 transition-colors duration-150 hover:bg-accent"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <p className="text-sm font-medium text-foreground">
-                        {query.subject}
+                        {notification.title}
                       </p>
 
-                      <span
-                        className={
-                          query.status === "answered"
-                            ? "shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-                            : "shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                        }
-                      >
-                        {query.status === "answered" ? "Answered" : "Open"}
-                      </span>
+                      {notification.isRead ? null : (
+                        <Badge variant="secondary">New</Badge>
+                      )}
                     </div>
 
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {query.message}
+                      {notification.message}
                     </p>
 
-                    {query.reply ? (
-                      <p className="mt-2 rounded-md bg-muted p-2 text-sm text-foreground">
-                        <span className="font-medium">Admin: </span>
-                        {query.reply}
+                    {notification.createdAt ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {formatDateTime(notification.createdAt)}
                       </p>
                     ) : null}
                   </div>
                 ))}
               </div>
             )}
-          </div>
-        </SectionCard>
-      </div>
+          </SectionCard>
+        </TabsContent>
+      </Tabs>
     </AppShell>
   );
 }
