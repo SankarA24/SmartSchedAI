@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  BookOpen,
   CalendarDays,
   CalendarOff,
+  CalendarRange,
+  Clock,
   LayoutDashboard,
   LayoutGrid,
   List,
@@ -10,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { navForRole } from "@/lib/nav";
+import { colorTokenFor, computeStats, groupByDay, resolveEntry } from "@/lib/schedule";
 import useIdentity from "@/hooks/useIdentity";
 import { useSystemConfig } from "@/hooks/useSystemConfig";
 import { useTimetableData } from "@/hooks/useTimetableData";
@@ -17,10 +21,14 @@ import { AppShell, PageHeader } from "@/components/AppShell";
 import { Callout } from "@/components/common/Callout";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionCard } from "@/components/common/SectionCard";
+import { StatCard } from "@/components/common/StatCard";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { chartBgClass } from "@/components/timetable/TimetableLegend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -308,6 +316,20 @@ function partitionAgainstGrid(entries, grid) {
    batch it finds keeps every entry on screen, where a client-side
    batch filter could silently drop rows whose course reference
    failed to resolve.
+
+   LAYOUT (bento, matching pages/Dashboard.jsx and the faculty
+   counterpart pages/FacultyTimetable.jsx):
+     Band 1 — the week itself in the dominant cell (xl:col-span-8)
+              beside a rail (xl:col-span-4) carrying four KPI
+              tiles, the per-day load and the courses behind the
+              week. Every figure in the rail is derived from the
+              same `entries` array the grid draws, so no cell on
+              the page can disagree with another.
+
+   Colour is semantic only: primary/success/warning/destructive
+   washes for state, and the chart tokens ONLY as the fill of the
+   class-type dots that key the grid's own stripes. Nothing on
+   this page puts text on a chart token.
 ============================================================ */
 
 function MyTimetable() {
@@ -369,6 +391,87 @@ function MyTimetable() {
   );
 
   /* -------------------------------------------------------
+     THE SAME WEEK, COUNTED
+     -------------------------------------------------------
+     Everything below is derived from `entries` — the very array
+     the grid renders. No extra request, no second source of
+     truth, and nothing here widens what this student can see.
+  ------------------------------------------------------- */
+
+  const stats = useMemo(
+    () => computeStats(entries, grid, maps),
+    [entries, grid, maps]
+  );
+
+  const classDays = useMemo(() => {
+    const days = new Set(
+      entries
+        .map((entry) => String(entry?.day || "").toLowerCase())
+        .filter((day) => day !== "")
+    );
+    return days.size;
+  }, [entries]);
+
+  /**
+   * Classes per working day, over the institution's own days (never a local
+   * copy). Each bar is a share of the busiest day, so a light week does not
+   * render as a row of full bars.
+   */
+  const dayLoad = useMemo(() => {
+    const byDay = groupByDay(entries, grid);
+    const rows = (grid?.days || []).map((day) => ({
+      day,
+      count: (byDay.get(day) || []).length,
+    }));
+    const max = rows.reduce((peak, row) => Math.max(peak, row.count), 0);
+    return { rows, max };
+  }, [entries, grid]);
+
+  const busiestDay = useMemo(() => {
+    if (dayLoad.max <= 0) return null;
+    return dayLoad.rows.find((row) => row.count === dayLoad.max) || null;
+  }, [dayLoad]);
+
+  /**
+   * The distinct courses behind this week. The dot is tinted with
+   * `colorTokenFor(entry, "type", …)` — the same token the grid stripes the
+   * matching cell with — so the two surfaces always agree. The token is a
+   * FILL only: the label beside it is plain foreground text.
+   */
+  const coursesThisWeek = useMemo(() => {
+    const seen = new Map();
+
+    for (const entry of entries) {
+      const resolved = resolveEntry(entry, maps);
+      const key = resolved.code || resolved.label || String(entry?.courseId ?? "");
+      if (!key) continue;
+
+      const existing = seen.get(key);
+      if (existing) {
+        existing.sessions += 1;
+        if (resolved.faculty?.name) existing.faculty.add(resolved.faculty.name);
+        if (resolved.room?.name) existing.rooms.add(resolved.room.name);
+        continue;
+      }
+
+      seen.set(key, {
+        key,
+        label: resolved.label || key,
+        code: resolved.code,
+        type: resolved.type || "lecture",
+        token: colorTokenFor(entry, "type", maps),
+        sessions: 1,
+        faculty: new Set(resolved.faculty?.name ? [resolved.faculty.name] : []),
+        rooms: new Set(resolved.room?.name ? [resolved.room.name] : []),
+      });
+    }
+
+    return [...seen.values()].sort(
+      (a, b) => b.sessions - a.sessions || a.label.localeCompare(b.label)
+    );
+  }, [entries, maps]);
+
+  /* -------------------------------------------------------
      PROFILE VALUES — no invented defaults
   ------------------------------------------------------- */
 
@@ -381,6 +484,8 @@ function MyTimetable() {
   const studentAcademicYear = isBlank(user?.academicYear)
     ? "—"
     : String(user.academicYear);
+
+  const cohortLine = `${studentDepartment} · Semester ${studentSemester} · ${studentAcademicYear}`;
 
   const timetablesError = dataError?.timetables || null;
 
@@ -397,15 +502,85 @@ function MyTimetable() {
 
   const loading = identityLoading || dataLoading;
 
+  // A failed fetch must never read as a zero: every derived figure falls back
+  // to an em dash while the timetable request is in error.
+  const figure = (value) => (timetablesError ? "—" : value);
+
+  const shellProps = {
+    brand,
+    nav,
+    chatbot: { context: { page: "my-timetable" } },
+  };
+
+  /* -------------------------------------------------------
+     LOADING — the bento's own shape, not a stack of bars
+  ------------------------------------------------------- */
+
+  if (loading) {
+    return (
+      <AppShell {...shellProps}>
+        <PageHeader
+          title="My Timetable"
+          description="Your generated weekly class schedule."
+        />
+
+        <div className="grid gap-5 xl:grid-cols-12">
+          <Skeleton className="h-[28rem] w-full rounded-xl xl:col-span-8" />
+
+          <div className="flex flex-col gap-5 xl:col-span-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[...Array(4)].map((_, index) => (
+                <Skeleton key={index} className="h-24 rounded-xl" />
+              ))}
+            </div>
+            <Skeleton className="h-52 w-full rounded-xl" />
+            <Skeleton className="h-52 w-full rounded-xl" />
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  /* -------------------------------------------------------
+     UNLINKED PROFILE — no data is shown at all
+  ------------------------------------------------------- */
+
+  if (!linked) {
+    return (
+      <AppShell {...shellProps}>
+        <PageHeader
+          title="My Timetable"
+          description="Your generated weekly class schedule."
+        />
+
+        <div className="space-y-5">
+          {errorMessage ? (
+            <Callout tone="destructive" title="Could not load your timetable">
+              {errorMessage}
+            </Callout>
+          ) : null}
+
+          <div className="flex min-h-[50vh] items-center justify-center">
+            <EmptyState
+              icon={UserX}
+              title="Profile not linked — contact your administrator"
+              description="Until your account is linked to a student record there is no cohort to show a timetable for."
+            />
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
   /* -------------------------------------------------------
      PAGE
   ------------------------------------------------------- */
 
   return (
-    <AppShell brand={brand} nav={nav} chatbot={{ context: { page: "my-timetable" } }}>
+    <AppShell {...shellProps}>
       <PageHeader
         title="My Timetable"
-        description="Your generated weekly class schedule."
+        description={cohortLine}
         actions={
           <>
             {/* Same Grid/List toggle as pages/FacultyTimetable.jsx: the list
@@ -429,39 +604,22 @@ function MyTimetable() {
         }
       />
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {errorMessage && (
           <Callout tone="destructive" title="Could not load your timetable">
             {errorMessage}
           </Callout>
         )}
 
-        {loading ? (
-          <SectionCard title="My Timetable" description="Loading your schedule…">
-            <div className="space-y-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-28 w-full" />
-              <Skeleton className="h-28 w-full" />
-            </div>
-          </SectionCard>
-        ) : !linked ? (
-          /* UNLINKED PROFILE — no data is shown at all */
+        {/* ============ Band 1 — the week, and everything derived from it ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ---- The week itself: the page's dominant cell ---- */}
           <SectionCard
-            title="Profile not linked"
-            description="Your account is not connected to a student record."
-            icon={UserX}
-          >
-            <EmptyState
-              icon={UserX}
-              title="Profile not linked — contact your administrator"
-              description="Until your account is linked to a student record there is no cohort to show a timetable for."
-            />
-          </SectionCard>
-        ) : (
-          <SectionCard
-            title={selected?.name || "My Timetable"}
-            description={`${studentDepartment} · Semester ${studentSemester} · ${studentAcademicYear}`}
+            title={selected?.name || "Weekly schedule"}
+            description="Your cohort's published week, drawn on the institution's scheduling grid"
             icon={CalendarDays}
+            padded={false}
+            className="min-w-0 overflow-hidden xl:col-span-8"
             actions={
               selected ? (
                 <Badge variant="secondary" className="capitalize">
@@ -470,63 +628,225 @@ function MyTimetable() {
               ) : null
             }
           >
-            {entries.length > 0 ? (
-              display === "list" ? (
-                <TimetableListView
-                  schedule={entries}
-                  grid={grid}
-                  maps={maps}
-                  groupBy="day"
-                  colorMode="type"
-                />
-              ) : (
-                <div className="space-y-4">
-                  <TimetableGrid
+            <div className="px-6 pb-6">
+              {entries.length > 0 ? (
+                display === "list" ? (
+                  <TimetableListView
                     schedule={entries}
                     grid={grid}
                     maps={maps}
-                    viewMode="byBatch"
+                    groupBy="day"
                     colorMode="type"
-                    title={selected?.name || "My Timetable"}
-                    subtitle={`${studentDepartment} · Semester ${studentSemester} · ${studentAcademicYear}`}
                   />
+                ) : (
+                  <div className="space-y-4">
+                    <TimetableGrid
+                      schedule={entries}
+                      grid={grid}
+                      maps={maps}
+                      viewMode="byBatch"
+                      colorMode="type"
+                      density="compact"
+                    />
 
-                  {/* Nothing disappears silently: whatever the grid could not
-                      place is named and then listed underneath it. */}
-                  {offGrid.length > 0 && (
-                    <div className="space-y-3">
-                      <Callout
-                        tone="warning"
-                        title={`${offGrid.length} ${
-                          offGrid.length === 1 ? "class falls" : "classes fall"
-                        } outside the current timetable grid`}
-                        icon={CalendarOff}
-                      >
-                        Their day or start time no longer matches a period in
-                        the institution&apos;s scheduling grid, so the week
-                        above cannot show them. They are listed below.
-                      </Callout>
+                    {/* Nothing disappears silently: whatever the grid could not
+                        place is named and then listed underneath it. */}
+                    {offGrid.length > 0 && (
+                      <div className="space-y-3">
+                        <Callout
+                          tone="warning"
+                          title={`${offGrid.length} ${
+                            offGrid.length === 1 ? "class falls" : "classes fall"
+                          } outside the current timetable grid`}
+                          icon={CalendarOff}
+                        >
+                          Their day or start time no longer matches a period in
+                          the institution&apos;s scheduling grid, so the week
+                          above cannot show them. They are listed below, and the
+                          List view shows every class.
+                        </Callout>
 
-                      <TimetableListView
-                        schedule={offGrid}
-                        grid={grid}
-                        maps={maps}
-                        groupBy="day"
-                        colorMode="type"
-                      />
-                    </div>
-                  )}
-                </div>
-              )
-            ) : (
-              <EmptyState
-                icon={CalendarDays}
-                title="Nothing scheduled yet"
-                description={emptyReason}
-              />
-            )}
+                        <TimetableListView
+                          schedule={offGrid}
+                          grid={grid}
+                          maps={maps}
+                          groupBy="day"
+                          colorMode="type"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              ) : (
+                <EmptyState
+                  icon={CalendarDays}
+                  title={
+                    timetablesError
+                      ? "Timetable unavailable"
+                      : "Nothing scheduled yet"
+                  }
+                  description={
+                    timetablesError
+                      ? "Your week could not be loaded. Refresh the page to try again."
+                      : emptyReason
+                  }
+                />
+              )}
+            </div>
           </SectionCard>
-        )}
+
+          {/* ---- The rail: the same week, counted ---- */}
+          <div className="flex min-w-0 flex-col gap-5 xl:col-span-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <StatCard
+                label="Classes"
+                value={figure(stats.totalClasses)}
+                icon={CalendarDays}
+              />
+
+              <StatCard
+                label="Class days"
+                value={figure(classDays)}
+                icon={CalendarRange}
+              />
+
+              <StatCard
+                label="Weekly hours"
+                value={figure(stats.hoursPerWeek)}
+                icon={Clock}
+              />
+
+              <StatCard
+                label="Courses"
+                value={figure(coursesThisWeek.length)}
+                icon={BookOpen}
+              />
+            </div>
+
+            {/* ---- Per-day load ---- */}
+            <SectionCard
+              title="Load by day"
+              description={
+                busiestDay && !timetablesError
+                  ? `Busiest on ${busiestDay.day} — ${busiestDay.count} ${
+                      busiestDay.count === 1 ? "class" : "classes"
+                    }`
+                  : "Classes per working day"
+              }
+              icon={CalendarRange}
+            >
+              {timetablesError ? (
+                <EmptyState
+                  icon={CalendarRange}
+                  title="Load unavailable"
+                  description="The week could not be loaded, so it cannot be counted."
+                />
+              ) : dayLoad.rows.length === 0 ? (
+                <EmptyState
+                  icon={CalendarRange}
+                  title="No working days configured"
+                  description="The institution's scheduling grid has no days to chart yet."
+                />
+              ) : (
+                <ul className="space-y-3">
+                  {dayLoad.rows.map((row) => (
+                    <li key={row.day} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">
+                        {row.day}
+                      </span>
+                      <Progress
+                        value={
+                          dayLoad.max > 0
+                            ? Math.round((row.count / dayLoad.max) * 100)
+                            : 0
+                        }
+                        className="h-2 min-w-0 flex-1"
+                        aria-label={`${row.day}: ${row.count} classes`}
+                      />
+                      <span className="w-4 shrink-0 text-right text-xs font-medium text-foreground tabular-nums">
+                        {row.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionCard>
+
+            {/* ---- The courses behind the week ---- */}
+            <SectionCard
+              title="Your courses"
+              description={
+                timetablesError || coursesThisWeek.length === 0
+                  ? "Taken from your published week"
+                  : `${coursesThisWeek.length} ${
+                      coursesThisWeek.length === 1 ? "course" : "courses"
+                    } this week`
+              }
+              icon={BookOpen}
+            >
+              {timetablesError ? (
+                <EmptyState
+                  icon={BookOpen}
+                  title="Courses unavailable"
+                  description="The week could not be loaded, so its courses cannot be listed."
+                />
+              ) : coursesThisWeek.length === 0 ? (
+                <EmptyState
+                  icon={BookOpen}
+                  title="No courses yet"
+                  description="Courses appear here once a timetable is published for your cohort."
+                />
+              ) : (
+                <ul className="divide-y divide-border">
+                  {coursesThisWeek.map((course) => (
+                    <li
+                      key={course.key}
+                      className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`size-2.5 shrink-0 rounded-full ${chartBgClass(
+                          course.token
+                        )}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {course.label}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {[
+                            course.code,
+                            course.faculty.size > 0
+                              ? [...course.faculty].join(", ")
+                              : null,
+                            course.rooms.size > 0
+                              ? [...course.rooms].join(", ")
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "No room recorded"}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                        {course.sessions}/wk
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {!timetablesError && coursesThisWeek.length > 0 ? (
+                <>
+                  <Separator className="my-4" />
+                  <p className="text-xs text-muted-foreground">
+                    Dot colours match the class-type stripes on the week beside
+                    this card.
+                  </p>
+                </>
+              ) : null}
+            </SectionCard>
+          </div>
+        </div>
       </div>
     </AppShell>
   );

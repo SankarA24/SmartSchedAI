@@ -1,16 +1,23 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Archive,
   CalendarDays,
+  CheckCircle2,
   FileJson,
   FileSpreadsheet,
+  LayoutGrid,
+  PencilLine,
   RefreshCw,
   SearchX,
+  SlidersHorizontal,
   Sparkles,
+  TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import api from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { navForRole } from "@/lib/nav";
 import { computeStats } from "@/lib/schedule";
 import { useIdentity } from "@/hooks/useIdentity";
@@ -21,6 +28,7 @@ import { Callout } from "@/components/common/Callout";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyState } from "@/components/common/EmptyState";
 import { FilterBar } from "@/components/common/FilterBar";
+import { SectionCard } from "@/components/common/SectionCard";
 import { QualityScore } from "@/components/timetable/QualityScore";
 import { TimetableCard } from "@/components/timetable/TimetableCard";
 import { Button } from "@/components/ui/button";
@@ -32,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // =====================================================
 // /view-timetable — the timetable list (U7)
@@ -301,6 +310,71 @@ export default function ViewTimetable() {
       });
   }, [timetables, filters, grid, maps]);
 
+  const listError = error?.timetables || null;
+
+  /**
+   * The library at a glance, counted over the whole role-scoped list rather
+   * than the filtered rows — it is the context the filters are narrowing, so
+   * it must not move as they change. When the list failed to load every
+   * figure renders an em dash: an unreachable list and an empty one must not
+   * look the same.
+   *
+   * Each row is an alpha wash of a semantic token with the matching solid
+   * token on it, which stays legible in both themes.
+   */
+  const summary = useMemo(() => {
+    let published = 0;
+    let draft = 0;
+    let archived = 0;
+    let conflicts = 0;
+
+    for (const timetable of timetables) {
+      const status = String(timetable.status || "draft").toLowerCase();
+      if (status === "published") published += 1;
+      else if (status === "archived") archived += 1;
+      else draft += 1;
+      conflicts += openConflictCount(timetable);
+    }
+
+    const figure = (value) => (listError ? "—" : value);
+    const alarming = conflicts > 0 && !listError;
+
+    return [
+      {
+        key: "published",
+        label: "Published",
+        value: figure(published),
+        Icon: CheckCircle2,
+        wash: "bg-success/10",
+        text: "text-success",
+      },
+      {
+        key: "draft",
+        label: "Draft",
+        value: figure(draft),
+        Icon: PencilLine,
+        wash: "bg-warning/10",
+        text: "text-warning",
+      },
+      {
+        key: "archived",
+        label: "Archived",
+        value: figure(archived),
+        Icon: Archive,
+        wash: "bg-muted",
+        text: "text-muted-foreground",
+      },
+      {
+        key: "conflicts",
+        label: "Open conflicts",
+        value: figure(conflicts),
+        Icon: TriangleAlert,
+        wash: alarming ? "bg-destructive/10" : "bg-muted",
+        text: alarming ? "text-destructive" : "text-muted-foreground",
+      },
+    ];
+  }, [timetables, listError]);
+
   /**
    * How many other published timetables publishing `timetable` would archive.
    * Mirrors the server's `updateMany` match in `PATCH /:id/publish` exactly —
@@ -401,7 +475,7 @@ export default function ViewTimetable() {
     []
   );
 
-  const listError = error?.timetables || null;
+  const listLoading = loading && timetables.length === 0;
 
   return (
     <AppShell
@@ -429,30 +503,93 @@ export default function ViewTimetable() {
         }
       />
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {listError && (
           <Callout tone="destructive" title="Could not load timetables">
             {listError}
           </Callout>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <FilterBar
-            filters={filterDefs}
-            onChange={handleFilterChange}
-            onReset={filtersActive ? resetFilters : undefined}
-            right={
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {rows.length} of {timetables.length}
+        {/* ============ Band 1 — filters beside the library at a glance ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/*
+            The filter bar keeps its own slim cell. `FilterBar` draws its own
+            bottom rule, which lands on the cell's bottom edge, so the only
+            divider inside the cell is the one under the header.
+          */}
+          <section className="animate-in overflow-hidden rounded-xl border border-border bg-card shadow-sm fade-in duration-200 xl:col-span-8">
+            <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <SlidersHorizontal className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">Filters</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    Narrows the timetables you have access to
+                  </p>
+                </div>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                {rows.length} of {timetables.length} shown
               </span>
-            }
-          />
+            </div>
+
+            <div className="border-t border-border">
+              <FilterBar
+                filters={filterDefs}
+                onChange={handleFilterChange}
+                onReset={filtersActive ? resetFilters : undefined}
+              />
+            </div>
+          </section>
+
+          <SectionCard
+            title="At a glance"
+            description="Every timetable in this list, by status"
+            icon={LayoutGrid}
+            className="xl:col-span-4"
+          >
+            {listLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2, 3].map((key) => (
+                  <Skeleton key={key} className="h-11 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : (
+              <dl className="space-y-2">
+                {summary.map((row) => (
+                  <div
+                    key={row.key}
+                    className={cn(
+                      "flex items-center justify-between gap-3 rounded-lg px-3 py-2",
+                      row.wash
+                    )}
+                  >
+                    <dt
+                      className={cn(
+                        "flex min-w-0 items-center gap-2 text-sm font-medium",
+                        row.text
+                      )}
+                    >
+                      <row.Icon className="size-4 shrink-0" />
+                      <span className="truncate">{row.label}</span>
+                    </dt>
+                    <dd className={cn("text-sm font-semibold tabular-nums", row.text)}>
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </SectionCard>
         </div>
 
-        {loading && timetables.length === 0 ? (
-          <div className="space-y-4">
-            {[0, 1, 2].map((key) => (
-              <div key={key} className="h-52 animate-pulse rounded-xl bg-muted" />
+        {/* ============ Band 2 — the results ============ */}
+        {listLoading ? (
+          <div className="grid gap-5 lg:grid-cols-2">
+            {[0, 1, 2, 3].map((key) => (
+              <Skeleton key={key} className="h-72 w-full rounded-xl" />
             ))}
           </div>
         ) : rows.length === 0 ? (
@@ -488,7 +625,7 @@ export default function ViewTimetable() {
               const published = formatDate(timetable.publishedAt);
 
               return (
-                <div key={id}>
+                <div key={id} className="min-w-0">
                   <TimetableCard
                     timetable={timetable}
                     counts={counts}
@@ -506,8 +643,13 @@ export default function ViewTimetable() {
                     page's file to change. The negative margin tucks the strip
                     under the card's bottom edge so the two read as one card.
                   */}
-                  <div className="-mt-4 flex flex-col gap-3 rounded-b-xl border border-t-0 border-border bg-card px-5 pb-4 pt-5 shadow-sm sm:flex-row sm:items-center sm:gap-6">
-                    <dl className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                  <div className="-mt-4 flex flex-col gap-3 rounded-b-xl border border-t-0 border-border bg-card px-5 pb-4 pt-5 shadow-sm">
+                    <QualityScore
+                      score={timetable.metadata?.qualityScore}
+                      breakdown={timetable.metadata?.qualityBreakdown}
+                    />
+
+                    <dl className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
                       <div className="flex gap-1.5">
                         <dt>Created</dt>
                         <dd className="font-medium text-foreground">{created || "—"}</dd>
@@ -519,12 +661,6 @@ export default function ViewTimetable() {
                         </dd>
                       </div>
                     </dl>
-                    <div className="sm:w-56">
-                      <QualityScore
-                        score={timetable.metadata?.qualityScore}
-                        breakdown={timetable.metadata?.qualityBreakdown}
-                      />
-                    </div>
                   </div>
                 </div>
               );

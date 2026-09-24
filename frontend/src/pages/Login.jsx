@@ -18,18 +18,31 @@ import { cn } from "@/lib/utils";
 // =====================================================
 // /login (U9)
 //
-// Tokenization only. The markup, the copy, the role selector and the whole
-// submit path below are byte-for-byte the behaviour of the previous version;
-// the only thing that changed is that the `styles` object of inline CSS is
-// gone and every colour now comes from a design token, so this page follows
-// the light/dark theme like the rest of the app. Layout geometry (the
-// 1050x650 two-column card, the 0.95fr/1.05fr split, every spacing value) is
-// reproduced exactly.
+// The public landing page and the only screen an unauthenticated visitor
+// sees, so it is deliberately quiet: the branding half is a muted surface
+// rather than a full-bleed saturated panel, and full-strength `primary` is
+// spent on exactly one element — the sign-in button. Everything else that
+// carries the accent does so as a 10% wash with the solid token on top
+// (`bg-primary/10 text-primary`), the same pattern the dashboard uses for its
+// card icons, which stays legible in both themes because the wash sits over
+// whatever the card colour currently is.
+//
+// The submit path, the role selector, the validation and the error copy —
+// including the message that distinguishes an unreachable API from bad
+// credentials — are unchanged from the previous version. This is a visual
+// pass only.
 // =====================================================
 
 /** Shared geometry for both text inputs; only the right padding differs. */
 const INPUT_CLASS =
-  "h-[50px] w-full rounded-[10px] border border-border bg-background pl-[45px] text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40";
+  "h-11 w-full rounded-lg border border-border bg-background pl-10 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40";
+
+/** What the product does, as three plain statements. */
+const HIGHLIGHTS = [
+  { id: "academic", label: "Smart academic management", icon: GraduationCap },
+  { id: "portals", label: "Faculty & student portals", icon: Users },
+  { id: "access", label: "Secure role-based access", icon: ShieldCheck },
+];
 
 function Login() {
   const navigate = useNavigate();
@@ -127,91 +140,71 @@ function Login() {
   };
 
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background p-[30px]">
-      {/* Background decoration */}
-      <div className="pointer-events-none absolute -top-[220px] -left-[180px] size-[500px] rounded-full bg-primary/15 blur-[100px]"></div>
-      <div className="pointer-events-none absolute -right-[180px] -bottom-[250px] size-[550px] rounded-full bg-chart-4/15 blur-[110px]"></div>
+    <div className="flex min-h-screen w-full items-center justify-center bg-background px-4 py-8 sm:px-6 sm:py-10">
+      <div className="grid w-full max-w-5xl animate-in overflow-hidden rounded-xl border border-border bg-card shadow-sm fade-in duration-200 lg:grid-cols-[0.9fr_1.1fr]">
+        {/* ---- Branding panel ---- */}
+        <div className="flex flex-col justify-center gap-6 border-b border-border bg-muted px-6 py-8 sm:px-10 lg:border-r lg:border-b-0 lg:py-12">
+          <div className="min-w-0">
+            <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <GraduationCap className="size-6" />
+            </div>
 
-      <div className="relative z-[2] grid min-h-[650px] w-full max-w-[1050px] grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-3xl border border-border bg-card shadow-md">
-        {/* Left Branding Panel */}
-        <div className="flex flex-col justify-center bg-primary px-12 py-[55px] text-primary-foreground">
-          <div className="mb-[25px] flex size-16 items-center justify-center rounded-[18px] bg-primary-foreground/15">
-            <GraduationCap size={34} strokeWidth={2} />
+            <h1 className="mt-5 text-3xl font-semibold tracking-tight text-foreground">
+              SmartSched<span className="text-primary">AI</span>
+            </h1>
+
+            <p className="mt-2 text-base text-muted-foreground">
+              AI-Enabled Smart Classroom &amp; Timetable Scheduler
+            </p>
           </div>
 
-          <h1 className="m-0 text-[38px] font-extrabold tracking-[-1.2px] text-primary-foreground/80">
-            SmartSched<span className="text-primary-foreground">AI</span>
-          </h1>
+          <div className="h-px w-12 rounded-full bg-border"></div>
 
-          <p className="mt-3 mb-[25px] text-[18px] leading-[1.55] text-primary-foreground/80">
-            AI-Enabled Smart Classroom &
-            <br />
-            Timetable Scheduler
+          <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+            Intelligent scheduling for higher education institutions. Manage
+            classrooms, faculty, courses and timetables in one place.
           </p>
 
-          <div className="mb-[25px] h-[3px] w-[55px] rounded-[10px] bg-primary-foreground/40"></div>
+          {/*
+            Hidden below lg so the phone layout is the wordmark and the form,
+            nothing between them.
+          */}
+          <ul className="hidden list-none flex-col gap-3 p-0 lg:flex">
+            {HIGHLIGHTS.map((item) => {
+              const Icon = item.icon;
 
-          <p className="m-0 max-w-[390px] text-sm leading-[1.7] text-primary-foreground/70">
-            Intelligent scheduling for higher education
-            institutions. Manage classrooms, faculty,
-            courses and timetables in one place.
-          </p>
+              return (
+                <li
+                  key={item.id}
+                  className="flex items-center gap-3 text-sm text-foreground"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Icon className="size-4" />
+                  </span>
 
-          <div className="mt-[35px] flex flex-col gap-[15px]">
-            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
-              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
-                <GraduationCap size={18} />
-              </div>
-              <span>Smart Academic Management</span>
-            </div>
-
-            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
-              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
-                <Users size={18} />
-              </div>
-              <span>Faculty & Student Portals</span>
-            </div>
-
-            <div className="flex items-center gap-3 text-sm text-primary-foreground/90">
-              <div className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground">
-                <ShieldCheck size={18} />
-              </div>
-              <span>Secure Role-Based Access</span>
-            </div>
-          </div>
+                  <span>{item.label}</span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
-        {/* Login Panel */}
-        <div className="flex flex-col justify-center bg-card px-[55px] py-[45px]">
-          <div className="hidden">
-            <div className="flex size-11 items-center justify-center rounded-[14px] bg-primary text-primary-foreground">
-              <GraduationCap size={25} />
-            </div>
-
-            <div>
-              <div className="text-base font-semibold text-foreground">
-                SmartSchedAI
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Smart Scheduling Platform
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-7">
-            <h2 className="m-0 text-[30px] font-bold tracking-[-0.6px] text-foreground">
+        {/* ---- Sign-in panel ---- */}
+        <div className="flex flex-col justify-center bg-card px-6 py-8 sm:px-10 lg:py-12">
+          <div className="mb-6">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">
               Welcome back
             </h2>
 
-            <p className="mt-[7px] mb-0 text-[15px] text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               Sign in to access your portal
             </p>
           </div>
 
           {/* Role Selection */}
-          <div className="mb-[22px]">
-            <label className="mb-2 block text-[13px] font-semibold text-foreground">
-              Select Portal
+          <div className="mb-5">
+            <label className="mb-2 block text-xs font-medium text-muted-foreground">
+              Select portal
             </label>
 
             <div className="grid grid-cols-3 gap-2">
@@ -227,17 +220,15 @@ function Login() {
                       setRole(item.id);
                       setError("");
                     }}
+                    aria-pressed={active}
                     className={cn(
-                      "flex h-12 cursor-pointer items-center justify-center gap-[7px] rounded-[10px] border border-border bg-muted text-[13px] font-semibold text-muted-foreground transition-colors duration-200",
+                      "flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border text-[13px] font-medium transition-colors",
                       active
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "hover:bg-accent hover:text-foreground"
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
                     )}
                   >
-                    <Icon
-                      size={18}
-                      strokeWidth={2}
-                    />
+                    <Icon className="size-4" />
 
                     <span>{item.label}</span>
                   </button>
@@ -247,25 +238,25 @@ function Login() {
           </div>
 
           {error && (
-            <div className="mb-[18px] flex items-center gap-[9px] rounded-[10px] border border-destructive/30 bg-destructive/10 px-[13px] py-[11px] text-[13px] text-destructive">
-              <AlertCircle size={18} />
+            <div
+              role="alert"
+              className="mb-5 flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-[13px] leading-relaxed text-destructive"
+            >
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
 
-              <span>{error}</span>
+              <span className="min-w-0">{error}</span>
             </div>
           )}
 
           <form onSubmit={handleLogin}>
             {/* Email */}
-            <div className="mb-[19px]">
-              <label className="mb-2 block text-[13px] font-semibold text-foreground">
-                Email Address
+            <div className="mb-4">
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">
+                Email address
               </label>
 
               <div className="relative w-full">
-                <Mail
-                  size={19}
-                  className="pointer-events-none absolute top-1/2 left-[15px] -translate-y-1/2 text-muted-foreground"
-                />
+                <Mail className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-muted-foreground" />
 
                 <input
                   type="email"
@@ -278,23 +269,20 @@ function Login() {
                       ? "Enter your university email"
                       : "Enter your email address"
                   }
-                  className={cn(INPUT_CLASS, "pr-[15px]")}
+                  className={cn(INPUT_CLASS, "pr-3")}
                   autoComplete="email"
                 />
               </div>
             </div>
 
             {/* Password */}
-            <div className="mb-[19px]">
-              <label className="mb-2 block text-[13px] font-semibold text-foreground">
+            <div className="mb-4">
+              <label className="mb-2 block text-xs font-medium text-muted-foreground">
                 Password
               </label>
 
               <div className="relative w-full">
-                <Lock
-                  size={19}
-                  className="pointer-events-none absolute top-1/2 left-[15px] -translate-y-1/2 text-muted-foreground"
-                />
+                <Lock className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-muted-foreground" />
 
                 <input
                   type={
@@ -307,7 +295,7 @@ function Login() {
                     setPassword(e.target.value)
                   }
                   placeholder="Enter your password"
-                  className={cn(INPUT_CLASS, "pr-[50px]")}
+                  className={cn(INPUT_CLASS, "pr-11")}
                   autoComplete="current-password"
                 />
 
@@ -316,7 +304,7 @@ function Login() {
                   onClick={() =>
                     setShowPassword(!showPassword)
                   }
-                  className="absolute top-1/2 right-[13px] flex -translate-y-1/2 cursor-pointer items-center border-0 bg-transparent p-1 text-muted-foreground transition-colors hover:text-foreground"
+                  className="absolute inset-y-0 right-3 flex cursor-pointer items-center border-0 bg-transparent p-1 text-muted-foreground transition-colors hover:text-foreground"
                   aria-label={
                     showPassword
                       ? "Hide password"
@@ -324,27 +312,27 @@ function Login() {
                   }
                 >
                   {showPassword ? (
-                    <EyeOff size={19} />
+                    <EyeOff className="size-4" />
                   ) : (
-                    <Eye size={19} />
+                    <Eye className="size-4" />
                   )}
                 </button>
               </div>
             </div>
 
             {/* Options */}
-            <div className="mb-[23px] flex items-center justify-between text-xs">
-              <label className="flex cursor-pointer items-center gap-[7px] text-muted-foreground">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
                 <input
                   type="checkbox"
-                  className="size-[14px] cursor-pointer accent-primary"
+                  className="size-3.5 cursor-pointer accent-primary"
                 />
                 <span>Remember me</span>
               </label>
 
               <button
                 type="button"
-                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-medium text-primary transition-colors hover:text-primary/80"
                 onClick={() =>
                   setError(
                     "Please contact your administrator to reset your password."
@@ -355,12 +343,14 @@ function Login() {
               </button>
             </div>
 
-            {/* Login */}
+            {/*
+              The one element on this page that carries full-strength primary.
+            */}
             <button
               type="submit"
               disabled={loading}
               className={cn(
-                "flex h-[52px] w-full items-center justify-center gap-[9px] rounded-[10px] border-0 bg-primary text-[15px] font-semibold text-primary-foreground shadow-sm transition-colors duration-200",
+                "flex h-11 w-full items-center justify-center gap-2 rounded-lg border-0 bg-primary text-sm font-semibold text-primary-foreground shadow-sm transition-colors",
                 loading
                   ? "cursor-not-allowed opacity-65 shadow-none"
                   : "cursor-pointer hover:bg-primary/90"
@@ -376,21 +366,20 @@ function Login() {
               </span>
 
               {!loading && (
-                <ArrowRight size={19} />
+                <ArrowRight className="size-4" />
               )}
             </button>
           </form>
 
-          <div className="mt-[22px] flex items-center justify-center gap-[7px] text-[11px] text-muted-foreground">
-            <ShieldCheck size={16} />
-            <span>
-              Secure access to SmartSchedAI
-            </span>
-          </div>
+          <div className="mt-6 border-t border-border pt-4 text-center">
+            <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <ShieldCheck className="size-3.5" />
+              <span>Secure access to SmartSchedAI</span>
+            </p>
 
-          <div className="mt-[18px] text-center text-[10px] text-muted-foreground">
-            SmartSchedAI • Smart Classroom & Timetable
-            Scheduler
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              SmartSchedAI • Smart Classroom &amp; Timetable Scheduler
+            </p>
           </div>
         </div>
       </div>

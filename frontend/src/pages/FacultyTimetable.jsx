@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  BookOpen,
   CalendarDays,
   CalendarOff,
+  CalendarRange,
   Clock,
   DoorOpen,
   LayoutGrid,
@@ -14,16 +16,19 @@ import {
 import api from "@/lib/api";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { navForRole } from "@/lib/nav";
-import { computeStats } from "@/lib/schedule";
+import { colorTokenFor, computeStats, groupByDay, resolveEntry } from "@/lib/schedule";
 import { useIdentity } from "@/hooks/useIdentity";
 import { useSystemConfig } from "@/hooks/useSystemConfig";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { TimetableListView } from "@/components/timetable/TimetableListView";
+import { chartBgClass } from "@/components/timetable/TimetableLegend";
 import { SectionCard } from "@/components/common/SectionCard";
 import { StatCard } from "@/components/common/StatCard";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Callout } from "@/components/common/Callout";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -35,6 +40,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
   `groupValue` set to the signed-in member's own faculty id, over the
   server-owned grid from `useSystemConfig()` (GET /api/config/grid). Days and
   slots are never hardcoded here.
+
+  LAYOUT (bento, matching pages/Dashboard.jsx):
+    Band 1 — the week itself in the dominant cell (xl:col-span-8) with a
+             right-hand rail (xl:col-span-4) carrying the four KPI tiles, the
+             per-day load and the courses this member teaches. Every figure
+             in the rail is derived from the same `timetable` array the grid
+             draws, so nothing on the page can disagree with the week.
 
   DATA SCOPING (unchanged by the re-skin):
     - Identity comes from `useIdentity()` — no inline localStorage read.
@@ -274,6 +286,61 @@ export default function FacultyTimetable() {
     return days.size;
   }, [timetable]);
 
+  /**
+   * Classes per working day, over the institution's own days (never a local
+   * copy). The bar is a share of the busiest day, so a light week does not
+   * render as a row of full bars.
+   */
+  const dayLoad = useMemo(() => {
+    const byDay = groupByDay(timetable, grid);
+    const rows = (grid?.days || []).map((day) => ({
+      day,
+      count: (byDay.get(day) || []).length,
+    }));
+    const max = rows.reduce((peak, row) => Math.max(peak, row.count), 0);
+    return { rows, max };
+  }, [timetable, grid]);
+
+  const busiestDay = useMemo(() => {
+    if (dayLoad.max <= 0) return null;
+    return dayLoad.rows.find((row) => row.count === dayLoad.max) || null;
+  }, [dayLoad]);
+
+  /**
+   * The distinct courses behind this member's week, tinted with the same
+   * `colorTokenFor(entry, "course", …)` token the grid uses, so the dot in
+   * this card and the stripe in the grid are always the same colour.
+   */
+  const coursesTaught = useMemo(() => {
+    const seen = new Map();
+
+    for (const entry of timetable) {
+      const resolved = resolveEntry(entry, maps);
+      const key = resolved.code || resolved.label || String(entry?.courseId ?? "");
+      if (!key) continue;
+
+      const existing = seen.get(key);
+      if (existing) {
+        existing.sessions += 1;
+        if (resolved.room?.name) existing.rooms.add(resolved.room.name);
+        continue;
+      }
+
+      seen.set(key, {
+        key,
+        label: resolved.label || key,
+        code: resolved.code,
+        token: colorTokenFor(entry, "course", maps),
+        sessions: 1,
+        rooms: new Set(resolved.room?.name ? [resolved.room.name] : []),
+      });
+    }
+
+    return [...seen.values()].sort(
+      (a, b) => b.sessions - a.sessions || a.label.localeCompare(b.label)
+    );
+  }, [timetable, maps]);
+
   // --------------------------------------------------
   // Shell (navigation is shared — see lib/nav.js)
   // --------------------------------------------------
@@ -285,16 +352,22 @@ export default function FacultyTimetable() {
   if (identityLoading || loading) {
     return (
       <AppShell {...shellProps}>
-        <div className="space-y-6">
+        <div className="space-y-5">
           <Skeleton className="h-9 w-64" />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[...Array(4)].map((_, index) => (
-              <Skeleton key={index} className="h-24" />
-            ))}
-          </div>
+          <div className="grid gap-5 xl:grid-cols-12">
+            <Skeleton className="h-[28rem] w-full rounded-xl xl:col-span-8" />
 
-          <Skeleton className="h-96 w-full" />
+            <div className="flex flex-col gap-5 xl:col-span-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {[...Array(4)].map((_, index) => (
+                  <Skeleton key={index} className="h-24 rounded-xl" />
+                ))}
+              </div>
+              <Skeleton className="h-52 w-full rounded-xl" />
+              <Skeleton className="h-52 w-full rounded-xl" />
+            </div>
+          </div>
         </div>
       </AppShell>
     );
@@ -326,6 +399,10 @@ export default function FacultyTimetable() {
 
   const facultyName = faculty?.name || user?.name || "Faculty";
 
+  // A failed fetch must never read as a zero: every derived figure below
+  // falls back to an em dash while `error` is set.
+  const figure = (value) => (error ? "—" : value);
+
   return (
     <AppShell {...shellProps}>
       <PageHeader
@@ -352,8 +429,8 @@ export default function FacultyTimetable() {
         }
       />
 
-      {error ? (
-        <div className="mb-6">
+      <div className="space-y-5">
+        {error ? (
           <Callout
             tone="destructive"
             title="Unable to load timetable"
@@ -361,114 +438,247 @@ export default function FacultyTimetable() {
           >
             {error}
           </Callout>
-        </div>
-      ) : null}
+        ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Total Classes"
-          value={stats.totalClasses}
-          icon={CalendarDays}
-        />
+        {/* ============ Band 1 — the week, and everything derived from it ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ---- The week itself: the page's dominant cell ---- */}
+          <SectionCard
+            title="Weekly schedule"
+            description="Only your own classes, drawn on the institution's scheduling grid"
+            icon={CalendarDays}
+            padded={false}
+            className="min-w-0 overflow-hidden xl:col-span-8"
+          >
+            <div className="px-6 pb-6">
+              {timetable.length === 0 && !error ? (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="No classes scheduled"
+                  description="Your timetable doesn't contain any assigned classes yet."
+                />
+              ) : display === "list" ? (
+                <TimetableListView
+                  schedule={timetable}
+                  grid={grid}
+                  maps={maps}
+                  groupBy="day"
+                />
+              ) : (
+                <div className="space-y-4">
+                  <TimetableGrid
+                    className="print:hidden"
+                    schedule={timetable}
+                    grid={grid}
+                    maps={maps}
+                    viewMode="byFaculty"
+                    groupValue={facultyId}
+                    colorMode="course"
+                    density="compact"
+                  />
 
-        <StatCard label="Teaching Days" value={teachingDays} icon={CalendarDays} />
+                  {/* Nothing disappears silently: whatever the grid could not
+                      place is named and then listed underneath it. */}
+                  {offGrid.length > 0 ? (
+                    <div className="space-y-3 print:hidden">
+                      <Callout
+                        tone="warning"
+                        title={`${offGrid.length} ${
+                          offGrid.length === 1 ? "class falls" : "classes fall"
+                        } outside the current timetable grid`}
+                        icon={CalendarOff}
+                      >
+                        Their day or start time no longer matches a period in the
+                        institution&apos;s scheduling grid, so the week above
+                        cannot show them. They are listed below, and the List
+                        view shows every class.
+                      </Callout>
 
-        <StatCard label="Weekly Hours" value={stats.hoursPerWeek} icon={Clock} />
+                      <TimetableListView
+                        schedule={offGrid}
+                        grid={grid}
+                        maps={maps}
+                        groupBy="day"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
-        <StatCard
-          label="Rooms Used"
-          value={timetable.length ? stats.rooms : 0}
-          icon={DoorOpen}
-        />
-      </div>
-
-      <div className="mt-6">
-        <SectionCard
-          title="Weekly Schedule"
-          description="Only your own classes, drawn on the institution's scheduling grid"
-          icon={CalendarDays}
-          padded={false}
-          className="overflow-hidden"
-        >
-          <div className="px-6 pb-2">
-            {timetable.length === 0 && !error ? (
-              <EmptyState
-                icon={CalendarDays}
-                title="No Classes Scheduled"
-                description="Your timetable doesn't contain any assigned classes yet."
-              />
-            ) : display === "list" ? (
-              <TimetableListView
-                schedule={timetable}
-                grid={grid}
-                maps={maps}
-                groupBy="day"
-              />
-            ) : (
-              <div className="space-y-4">
+              {/* Institutional A4 table — screen-hidden, used by Print. */}
+              {timetable.length > 0 ? (
                 <TimetableGrid
-                  className="print:hidden"
+                  className="hidden print:block"
                   schedule={timetable}
                   grid={grid}
                   maps={maps}
                   viewMode="byFaculty"
                   groupValue={facultyId}
-                  colorMode="course"
+                  printable
+                  showLegend={false}
+                  title={`Timetable — ${facultyName}`}
+                  subtitle={
+                    timetable[0]?.department
+                      ? `${timetable[0].department}${
+                          timetable[0].semester
+                            ? ` · Semester ${timetable[0].semester}`
+                            : ""
+                        }`
+                      : undefined
+                  }
                 />
+              ) : null}
+            </div>
+          </SectionCard>
 
-                {/* Nothing disappears silently: whatever the grid could not
-                    place is named and then listed underneath it. */}
-                {offGrid.length > 0 ? (
-                  <div className="space-y-3 print:hidden">
-                    <Callout
-                      tone="warning"
-                      title={`${offGrid.length} ${
-                        offGrid.length === 1 ? "class falls" : "classes fall"
-                      } outside the current timetable grid`}
-                      icon={CalendarOff}
-                    >
-                      Their day or start time no longer matches a period in the
-                      institution&apos;s scheduling grid, so the week above
-                      cannot show them. They are listed below, and the List
-                      view shows every class.
-                    </Callout>
-
-                    <TimetableListView
-                      schedule={offGrid}
-                      grid={grid}
-                      maps={maps}
-                      groupBy="day"
-                    />
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {/* Institutional A4 table — screen-hidden, used by Print. */}
-            {timetable.length > 0 ? (
-              <TimetableGrid
-                className="hidden print:block"
-                schedule={timetable}
-                grid={grid}
-                maps={maps}
-                viewMode="byFaculty"
-                groupValue={facultyId}
-                printable
-                showLegend={false}
-                title={`Timetable — ${facultyName}`}
-                subtitle={
-                  timetable[0]?.department
-                    ? `${timetable[0].department}${
-                        timetable[0].semester
-                          ? ` · Semester ${timetable[0].semester}`
-                          : ""
-                      }`
-                    : undefined
-                }
+          {/* ---- The rail: the same week, counted ---- */}
+          <div className="flex min-w-0 flex-col gap-5 print:hidden xl:col-span-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <StatCard
+                label="Total classes"
+                value={figure(stats.totalClasses)}
+                icon={CalendarDays}
               />
-            ) : null}
+
+              <StatCard
+                label="Teaching days"
+                value={figure(teachingDays)}
+                icon={CalendarRange}
+              />
+
+              <StatCard
+                label="Weekly hours"
+                value={figure(stats.hoursPerWeek)}
+                icon={Clock}
+              />
+
+              <StatCard
+                label="Rooms used"
+                value={figure(timetable.length ? stats.rooms : 0)}
+                icon={DoorOpen}
+              />
+            </div>
+
+            {/* ---- Per-day load ---- */}
+            <SectionCard
+              title="Load by day"
+              description={
+                busiestDay && !error
+                  ? `Busiest on ${busiestDay.day} — ${busiestDay.count} ${
+                      busiestDay.count === 1 ? "class" : "classes"
+                    }`
+                  : "Classes per working day"
+              }
+              icon={CalendarRange}
+            >
+              {error ? (
+                <EmptyState
+                  icon={CalendarRange}
+                  title="Load unavailable"
+                  description="The week could not be loaded, so it cannot be counted."
+                />
+              ) : dayLoad.rows.length === 0 ? (
+                <EmptyState
+                  icon={CalendarRange}
+                  title="No working days configured"
+                  description="The institution's scheduling grid has no days to chart yet."
+                />
+              ) : (
+                <ul className="space-y-3">
+                  {dayLoad.rows.map((row) => (
+                    <li key={row.day} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">
+                        {row.day}
+                      </span>
+                      <Progress
+                        value={
+                          dayLoad.max > 0
+                            ? Math.round((row.count / dayLoad.max) * 100)
+                            : 0
+                        }
+                        className="h-2 min-w-0 flex-1"
+                        aria-label={`${row.day}: ${row.count} classes`}
+                      />
+                      <span className="w-4 shrink-0 text-right text-xs font-medium text-foreground tabular-nums">
+                        {row.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </SectionCard>
+
+            {/* ---- The courses behind the week ---- */}
+            <SectionCard
+              title="Courses you teach"
+              description={
+                error || coursesTaught.length === 0
+                  ? "Taken from your published classes"
+                  : `${coursesTaught.length} ${
+                      coursesTaught.length === 1 ? "course" : "courses"
+                    } this week`
+              }
+              icon={BookOpen}
+            >
+              {error ? (
+                <EmptyState
+                  icon={BookOpen}
+                  title="Courses unavailable"
+                  description="The week could not be loaded, so its courses cannot be listed."
+                />
+              ) : coursesTaught.length === 0 ? (
+                <EmptyState
+                  icon={BookOpen}
+                  title="No courses assigned"
+                  description="Courses appear here once a published timetable includes your classes."
+                />
+              ) : (
+                <ul className="divide-y divide-border">
+                  {coursesTaught.map((course) => (
+                    <li
+                      key={course.key}
+                      className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`size-2.5 shrink-0 rounded-full ${chartBgClass(
+                          course.token
+                        )}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {course.label}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {[
+                            course.code,
+                            course.rooms.size > 0
+                              ? [...course.rooms].join(", ")
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "No room recorded"}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                        {course.sessions}/wk
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {!error && coursesTaught.length > 0 ? (
+                <>
+                  <Separator className="my-4" />
+                  <p className="text-xs text-muted-foreground">
+                    Dot colours match the stripes on the week beside this card.
+                  </p>
+                </>
+              ) : null}
+            </SectionCard>
           </div>
-        </SectionCard>
+        </div>
       </div>
     </AppShell>
   );

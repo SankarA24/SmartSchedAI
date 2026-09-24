@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Clock,
   Coffee,
+  Gauge,
   Grid2x2,
   Info,
   Loader2,
@@ -11,12 +12,15 @@ import {
   RotateCcw,
   Save,
   Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
   Timer,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import api from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { navForRole } from "@/lib/nav";
 import { slotRows } from "@/lib/schedule";
 import { useSystemConfig } from "@/hooks/useSystemConfig";
@@ -751,19 +755,40 @@ function TimeField({ id, label, hint, value, onChange, disabled, disabledReason 
   );
 }
 
+/** Small status pill. Tints are alpha washes of a semantic token, so they
+ *  stay legible over the card in both themes. */
+const CHIP_TONES = {
+  muted: "bg-muted text-muted-foreground",
+  success: "bg-success/10 text-success",
+  warning: "bg-warning/10 text-warning",
+};
+
+function Chip({ tone = "muted", children }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+        CHIP_TONES[tone] || CHIP_TONES.muted
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function ToggleRow({ id, label, description, enforcement, checked, onCheckedChange }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card p-4">
+    <div className="flex items-start justify-between gap-4 border-b border-border py-4 first:pt-0 last:border-b-0 last:pb-0">
       <div className="flex min-w-0 flex-col gap-1">
         <Label htmlFor={id} className="text-sm font-medium text-foreground">
           {label}
         </Label>
         <p className="text-xs text-muted-foreground">{description}</p>
         {enforcement ? (
-          <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            <Info className="size-3" />
-            {enforcement}
-          </span>
+          <p className="mt-1 flex items-start gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+            <Info className="mt-0.5 size-3 shrink-0" />
+            <span>{enforcement}</span>
+          </p>
         ) : null}
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
@@ -784,23 +809,55 @@ function ErrorList({ errors }) {
   );
 }
 
-function SaveBar({ dirty, errors, saving, onSave, onReset }) {
+/**
+ * The one place a tab is saved from: whatever blocks the save, then the
+ * actions, separated from the messages by a rule. Identical on all three
+ * tabs so the save affordance never moves.
+ */
+function SaveCard({ dirty, errors, saveError, saving, onSave, onReset }) {
+  const hasMessages = errors.length > 0 || Boolean(saveError);
+
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
-      {dirty ? (
-        <span className="mr-auto text-xs text-muted-foreground">Unsaved changes</span>
-      ) : (
-        <span className="mr-auto text-xs text-muted-foreground">No changes</span>
-      )}
-      <Button type="button" variant="outline" onClick={onReset} disabled={!dirty || saving}>
-        <RotateCcw className="size-4" />
-        Reset
-      </Button>
-      <Button type="button" onClick={onSave} disabled={!dirty || saving || errors.length > 0}>
-        {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-        Save changes
-      </Button>
-    </div>
+    <SectionCard className="animate-in fade-in duration-200">
+      <div className="flex flex-col gap-4">
+        {hasMessages ? (
+          <div className="flex flex-col gap-3">
+            <ErrorList errors={errors} />
+            {saveError ? (
+              <Callout tone="destructive" title="Save failed" icon={AlertTriangle}>
+                {saveError}
+              </Callout>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div
+          className={cn(
+            "flex flex-wrap items-center justify-end gap-2",
+            hasMessages && "border-t border-border pt-4"
+          )}
+        >
+          <span className="mr-auto inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <span
+              className={cn("size-1.5 rounded-full", dirty ? "bg-warning" : "bg-border")}
+            />
+            {dirty ? "Unsaved changes" : "No changes"}
+          </span>
+          <Button type="button" variant="outline" onClick={onReset} disabled={!dirty || saving}>
+            <RotateCcw className="size-4" />
+            Reset
+          </Button>
+          <Button
+            type="button"
+            onClick={onSave}
+            disabled={!dirty || saving || errors.length > 0}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save changes
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 
@@ -821,31 +878,40 @@ function SchedulePreview({ grid, serverGrid, dirty, slotMode, fellBack, capNote 
   const matches = serverGrid ? sameGrid(grid, serverGrid) : false;
   const weekly = (grid.days?.length || 0) * (grid.slots?.length || 0);
 
+  const figures = [
+    { label: "Days", value: grid.days?.length || 0 },
+    { label: "Periods/day", value: grid.slots?.length || 0 },
+    { label: "Weekly slots", value: weekly },
+  ];
+
   return (
     <SectionCard
-      title="Current Schedule Preview"
-      description="The grid GET /api/config/grid will return once this tab is saved."
+      title="Current schedule preview"
+      description="The grid GET /api/config/grid returns once Working Hours is saved."
       icon={Grid2x2}
+      className="animate-in fade-in duration-200"
+      footer={
+        <dl className="grid w-full grid-cols-3 gap-3">
+          {figures.map((figure) => (
+            <div key={figure.label} className="flex min-w-0 flex-col gap-0.5">
+              <dt className="truncate text-xs text-muted-foreground">{figure.label}</dt>
+              <dd className="text-lg font-semibold tabular-nums text-foreground">
+                {figure.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      }
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={
-              matches
-                ? "inline-flex items-center rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
-                : "inline-flex items-center rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning"
-            }
-          >
+          <Chip tone={matches ? "success" : "warning"}>
             {matches ? "Matches the live grid" : "Differs from the live grid"}
-          </span>
-          <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+          </Chip>
+          <Chip>
             {slotMode === "explicit" ? "Fixed slot list" : "Derived from working hours"}
-          </span>
-          {dirty ? (
-            <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-              Unsaved
-            </span>
-          ) : null}
+          </Chip>
+          {dirty ? <Chip>Unsaved</Chip> : null}
         </div>
 
         {fellBack ? (
@@ -861,23 +927,28 @@ function SchedulePreview({ grid, serverGrid, dirty, slotMode, fellBack, capNote 
               row.kind === "slot" ? (
                 <li
                   key={`slot-${row.start}-${row.end}`}
-                  className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
                 >
-                  <span className="text-muted-foreground">Period {(row.index ?? 0) + 1}</span>
-                  <span className="font-medium tabular-nums text-foreground">
+                  <span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-[11px] font-medium text-primary tabular-nums">
+                      {(row.index ?? 0) + 1}
+                    </span>
+                    <span className="truncate">Period</span>
+                  </span>
+                  <span className="shrink-0 font-medium tabular-nums text-foreground">
                     {row.start} – {row.end}
                   </span>
                 </li>
               ) : (
                 <li
                   key={`break-${row.start}-${row.end}`}
-                  className="flex items-center justify-between rounded-md border border-dashed border-border bg-muted px-3 py-2 text-sm"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-3 py-2 text-sm"
                 >
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <Coffee className="size-3.5" />
-                    {row.name || "Break"}
+                  <span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <Coffee className="size-3.5 shrink-0" />
+                    <span className="truncate">{row.name || "Break"}</span>
                   </span>
-                  <span className="tabular-nums text-muted-foreground">
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
                     {row.start} – {row.end}
                   </span>
                 </li>
@@ -890,26 +961,12 @@ function SchedulePreview({ grid, serverGrid, dirty, slotMode, fellBack, capNote 
           </Callout>
         )}
 
-        <dl className="grid grid-cols-3 gap-2 border-t border-border pt-4 text-sm">
-          <div>
-            <dt className="text-xs text-muted-foreground">Days</dt>
-            <dd className="font-medium text-foreground">{grid.days?.length || 0}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Periods/day</dt>
-            <dd className="font-medium text-foreground">{grid.slots?.length || 0}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-muted-foreground">Weekly slots</dt>
-            <dd className="font-medium text-foreground">{weekly}</dd>
-          </div>
-        </dl>
-
-        <p className="text-xs text-muted-foreground">
-          Columns: {grid.days?.join(", ") || "none"}.
-        </p>
-
-        {capNote ? <p className="text-xs text-muted-foreground">{capNote}</p> : null}
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted-foreground">
+            Columns: {grid.days?.join(", ") || "none"}.
+          </p>
+          {capNote ? <p className="text-xs text-muted-foreground">{capNote}</p> : null}
+        </div>
       </div>
     </SectionCard>
   );
@@ -1121,17 +1178,15 @@ export default function InfrastructurePage() {
         }
       />
 
-      {loadError ? (
-        <div className="mb-6">
+      <div className="space-y-5">
+        {loadError ? (
           <Callout tone="destructive" title="Configuration unavailable" icon={AlertTriangle}>
             {loadError} The values below are the schema defaults and have not been read
             from the server.
           </Callout>
-        </div>
-      ) : null}
+        ) : null}
 
-      {mismatch ? (
-        <div className="mb-6">
+        {mismatch ? (
           <Callout
             tone="destructive"
             title="Preview disagreed with the server"
@@ -1142,254 +1197,293 @@ export default function InfrastructurePage() {
             server's grid, which is the one every scheduler uses. Please report this —
             the preview is a mirror of the server's derivation and should never drift.
           </Callout>
+        ) : null}
+
+        {/* ============ The grid in force ============ */}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Working days"
+            value={daysStat}
+            delta={(serverGrid?.days || []).map((day) => day.slice(0, 3)).join(" · ")}
+            icon={CalendarDays}
+            loading={loading}
+          />
+          <StatCard
+            label="Periods per day"
+            value={periodsStat}
+            delta={serverGrid ? `cap ${serverGrid.maxPeriodsPerDay}` : undefined}
+            icon={Grid2x2}
+            loading={loading}
+          />
+          <StatCard
+            label="Period duration"
+            value={durationStat}
+            delta={durationDelta}
+            icon={Timer}
+            loading={loading}
+          />
+          <StatCard
+            label="Total weekly slots"
+            value={daysStat * periodsStat}
+            delta={`${daysStat} days × ${periodsStat} periods`}
+            icon={Clock}
+            loading={loading}
+            tone={daysStat * periodsStat === 0 ? "destructive" : "default"}
+          />
         </div>
-      ) : null}
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Working days"
-          value={daysStat}
-          delta={(serverGrid?.days || []).map((day) => day.slice(0, 3)).join(" · ")}
-          icon={CalendarDays}
-          loading={loading}
-        />
-        <StatCard
-          label="Periods per day"
-          value={periodsStat}
-          delta={serverGrid ? `cap ${serverGrid.maxPeriodsPerDay}` : undefined}
-          icon={Grid2x2}
-          loading={loading}
-        />
-        <StatCard
-          label="Period duration"
-          value={durationStat}
-          delta={durationDelta}
-          icon={Timer}
-          loading={loading}
-        />
-        <StatCard
-          label="Total weekly slots"
-          value={daysStat * periodsStat}
-          delta={`${daysStat} days × ${periodsStat} periods`}
-          icon={Clock}
-          loading={loading}
-          tone={daysStat * periodsStat === 0 ? "destructive" : "default"}
-        />
-      </div>
-
-      <SectionCard
-        title="Scheduling configuration"
-        description="Each tab saves on its own. Everything here is read by the generator, the validator or the quality score — where it is not, the field says so."
-        icon={Settings2}
-      >
+        {/* ============ Editor (large) | preview (tall) ============ */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList variant="underline" className="w-full justify-start overflow-x-auto">
-            {Object.keys(TAB_LABELS).map((tab) => (
-              <TabsTrigger key={tab} value={tab}>
-                {TAB_LABELS[tab]}
-                {dirty[tab] ? (
-                  <span
-                    aria-label="unsaved changes"
-                    className="ml-1 inline-block size-1.5 rounded-full bg-primary"
-                  />
-                ) : null}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* ---------------- GENERAL POLICIES ---------------- */}
-          <TabsContent value="general" className="pt-6">
-            <div className="flex flex-col gap-6">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <NumberField
-                  id="maxPeriodsPerDay"
-                  label="Max periods per day"
-                  limitKey="maxPeriodsPerDay"
-                  value={draft.maxPeriodsPerDay}
-                  onChange={(value) => setField("maxPeriodsPerDay", value)}
-                  hint="Caps the grid: derivation stops after this many periods, and a fixed slot list longer than this is rejected. It is not a per-batch daily cap during generation."
-                />
-                <NumberField
-                  id="maxConsecutiveHours"
-                  label="Max consecutive hours"
-                  limitKey="maxConsecutiveHours"
-                  value={draft.maxConsecutiveHours}
-                  onChange={(value) => setField("maxConsecutiveHours", value)}
-                  hint="Used when scoring a finished timetable (student-convenience penalty in utils/qualityScore.js). The schedulers do not yet avoid long runs while generating."
-                />
-                <NumberField
-                  id="maxDailyHoursPerFaculty"
-                  label="Max daily hours per faculty"
-                  limitKey="maxDailyHoursPerFaculty"
-                  value={draft.maxDailyHoursPerFaculty}
-                  onChange={(value) => setField("maxDailyHoursPerFaculty", value)}
-                  hint="Recorded only — no scheduler or scorer reads it yet. Weekly limits come from each faculty member's own Max hours per week."
-                />
-                <NumberField
-                  id="weeksPerSemester"
-                  label="Weeks per semester"
-                  limitKey="weeksPerSemester"
-                  value={draft.weeksPerSemester}
-                  onChange={(value) => setField("weeksPerSemester", value)}
-                  hint="Divides each course's total hours into weekly sessions, so this directly changes how many classes the generator must place."
-                />
+          <div className="grid gap-5 xl:grid-cols-12">
+            <div className="flex min-w-0 flex-col gap-5 xl:col-span-8">
+              <div className="animate-in rounded-xl border border-border bg-card shadow-sm fade-in duration-200">
+                <div className="px-4">
+                  <TabsList
+                    variant="underline"
+                    className="w-full justify-start gap-6 overflow-x-auto"
+                  >
+                    {Object.keys(TAB_LABELS).map((tab) => (
+                      <TabsTrigger key={tab} value={tab}>
+                        {TAB_LABELS[tab]}
+                        {dirty[tab] ? (
+                          <span
+                            aria-label="unsaved changes"
+                            className="ml-1 inline-block size-1.5 rounded-full bg-warning"
+                          />
+                        ) : null}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+                <p className="px-4 py-3 text-xs text-muted-foreground">
+                  Each tab saves on its own. Everything here is read by the generator, the
+                  validator or the quality score — where it is not, the field says so.
+                </p>
               </div>
 
-              <ErrorList errors={errors.general} />
-              {saveError && activeTab === "general" ? (
-                <Callout tone="destructive" title="Save failed" icon={AlertTriangle}>
-                  {saveError}
-                </Callout>
-              ) : null}
-
-              <SaveBar
-                dirty={dirty.general}
-                errors={errors.general}
-                saving={saving}
-                onSave={() => setConfirmOpen(true)}
-                onReset={() => resetTab("general")}
-              />
-            </div>
-          </TabsContent>
-
-          {/* ---------------- WORKING HOURS ---------------- */}
-          <TabsContent value="hours" className="pt-6">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <div className="flex flex-col gap-6 lg:col-span-2">
-                <div className="flex flex-col gap-2">
-                  <Label>Slot source</Label>
-                  <div className="inline-flex w-fit rounded-lg border border-border p-1">
-                    <button
-                      type="button"
-                      aria-pressed={slotMode === "explicit"}
-                      disabled={!previewGrid.slots.length && slotMode === "derived"}
-                      onClick={() =>
-                        setField(
-                          "slots",
-                          previewGrid.slots.map((slot) => ({
-                            start: slot.start,
-                            end: slot.end,
-                          }))
-                        )
-                      }
-                      className={
-                        slotMode === "explicit"
-                          ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                          : "rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                      }
-                    >
-                      Fixed slot list
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={slotMode === "derived"}
-                      onClick={() => setField("slots", [])}
-                      className={
-                        slotMode === "derived"
-                          ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                          : "rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                      }
-                    >
-                      Derive from working hours
-                    </button>
+              {/* ---------------- GENERAL POLICIES ---------------- */}
+              <TabsContent value="general" className="flex-col gap-5 data-[state=active]:flex">
+                <SectionCard
+                  title="Day capacity"
+                  description="How much teaching a single day of the grid may hold."
+                  icon={Gauge}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <NumberField
+                      id="maxPeriodsPerDay"
+                      label="Max periods per day"
+                      limitKey="maxPeriodsPerDay"
+                      value={draft.maxPeriodsPerDay}
+                      onChange={(value) => setField("maxPeriodsPerDay", value)}
+                      hint="Caps the grid: derivation stops after this many periods, and a fixed slot list longer than this is rejected. It is not a per-batch daily cap during generation."
+                    />
+                    <NumberField
+                      id="maxConsecutiveHours"
+                      label="Max consecutive hours"
+                      limitKey="maxConsecutiveHours"
+                      value={draft.maxConsecutiveHours}
+                      onChange={(value) => setField("maxConsecutiveHours", value)}
+                      hint="Used when scoring a finished timetable (student-convenience penalty in utils/qualityScore.js). The schedulers do not yet avoid long runs while generating."
+                    />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {slotMode === "explicit"
-                      ? "The grid is exactly the fixed list shown in the preview — today's institutional periods, whose uneven gaps no fixed-step walk reproduces. Period duration and the gap between periods are stored but do not shape it."
-                      : "The server walks the day from the start time in period-duration steps, inserting the gap between periods, skipping any window that overlaps a break, and stopping at the end time or at max periods per day."}
-                  </p>
-                  {slotMode === "explicit" ? (
+                </SectionCard>
+
+                <SectionCard
+                  title="Workload and term"
+                  description="Limits that reach past a single day — one faculty member's load, and the length of the semester."
+                  icon={Timer}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <NumberField
+                      id="maxDailyHoursPerFaculty"
+                      label="Max daily hours per faculty"
+                      limitKey="maxDailyHoursPerFaculty"
+                      value={draft.maxDailyHoursPerFaculty}
+                      onChange={(value) => setField("maxDailyHoursPerFaculty", value)}
+                      hint="Recorded only — no scheduler or scorer reads it yet. Weekly limits come from each faculty member's own Max hours per week."
+                    />
+                    <NumberField
+                      id="weeksPerSemester"
+                      label="Weeks per semester"
+                      limitKey="weeksPerSemester"
+                      value={draft.weeksPerSemester}
+                      onChange={(value) => setField("weeksPerSemester", value)}
+                      hint="Divides each course's total hours into weekly sessions, so this directly changes how many classes the generator must place."
+                    />
+                  </div>
+                </SectionCard>
+
+                <SaveCard
+                  dirty={dirty.general}
+                  errors={errors.general}
+                  saveError={activeTab === "general" ? saveError : null}
+                  saving={saving}
+                  onSave={() => setConfirmOpen(true)}
+                  onReset={() => resetTab("general")}
+                />
+              </TabsContent>
+
+              {/* ---------------- WORKING HOURS ---------------- */}
+              <TabsContent value="hours" className="flex-col gap-5 data-[state=active]:flex">
+                <SectionCard
+                  title="Slot source"
+                  description="Where the periods in the grid come from."
+                  icon={Settings2}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="flex flex-col gap-3">
+                    <div className="inline-flex w-full flex-col gap-1 rounded-lg bg-muted p-1 sm:w-fit sm:flex-row">
+                      <button
+                        type="button"
+                        aria-pressed={slotMode === "explicit"}
+                        disabled={!previewGrid.slots.length && slotMode === "derived"}
+                        onClick={() =>
+                          setField(
+                            "slots",
+                            previewGrid.slots.map((slot) => ({
+                              start: slot.start,
+                              end: slot.end,
+                            }))
+                          )
+                        }
+                        className={
+                          slotMode === "explicit"
+                            ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                            : "rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                        }
+                      >
+                        Fixed slot list
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={slotMode === "derived"}
+                        onClick={() => setField("slots", [])}
+                        className={
+                          slotMode === "derived"
+                            ? "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                            : "rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                        }
+                      >
+                        Derive from working hours
+                      </button>
+                    </div>
+
                     <p className="text-xs text-muted-foreground">
-                      Switching to derived clears the fixed list; switching back freezes
-                      whatever the preview currently shows.
+                      {slotMode === "explicit"
+                        ? "The grid is exactly the fixed list shown in the preview — today's institutional periods, whose uneven gaps no fixed-step walk reproduces. Period duration and the gap between periods are stored but do not shape it."
+                        : "The server walks the day from the start time in period-duration steps, inserting the gap between periods, skipping any window that overlaps a break, and stopping at the end time or at max periods per day."}
                     </p>
-                  ) : null}
-                </div>
-
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <TimeField
-                    id="startTime"
-                    label="Day start"
-                    value={draft.startTime}
-                    onChange={(value) => setField("startTime", value)}
-                    hint={
-                      slotMode === "derived"
-                        ? "First period starts here."
-                        : "With a fixed slot list this only bounds where breaks may fall."
-                    }
-                  />
-                  <TimeField
-                    id="endTime"
-                    label="Day end"
-                    value={draft.endTime}
-                    onChange={(value) => setField("endTime", value)}
-                    hint={
-                      slotMode === "derived"
-                        ? "No period may end after this."
-                        : "With a fixed slot list this only bounds where breaks may fall."
-                    }
-                  />
-                  <NumberField
-                    id="periodDurationMin"
-                    label="Period duration (minutes)"
-                    limitKey="periodDurationMin"
-                    value={draft.periodDurationMin}
-                    onChange={(value) => setField("periodDurationMin", value)}
-                    disabled={slotMode === "explicit"}
-                    disabledReason="Only used when slots are derived. Switch Slot source to “Derive from working hours” to make this shape the day."
-                    hint="Length of every derived period."
-                  />
-                  <NumberField
-                    id="breakDurationMin"
-                    label="Gap between periods (minutes)"
-                    limitKey="breakDurationMin"
-                    value={draft.breakDurationMin}
-                    onChange={(value) => setField("breakDurationMin", value)}
-                    disabled={slotMode === "explicit"}
-                    disabledReason="Only used when slots are derived. Switch Slot source to “Derive from working hours” to make this shape the day."
-                    hint="Idle minutes inserted after each derived period. This is not the lunch break — add that below."
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Label>Working days</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {DAY_NAMES.map((day) => {
-                      const on = draft.workingDays.includes(day);
-                      return (
-                        <button
-                          key={day}
-                          type="button"
-                          aria-pressed={on}
-                          onClick={() => {
-                            const next = on
-                              ? draft.workingDays.filter((d) => d !== day)
-                              : [...draft.workingDays, day];
-                            setField(
-                              "workingDays",
-                              DAY_NAMES.filter((d) => next.includes(d))
-                            );
-                          }}
-                          className={
-                            on
-                              ? "rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
-                              : "rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                          }
-                        >
-                          {day.slice(0, 3)}
-                        </button>
-                      );
-                    })}
+                    {slotMode === "explicit" ? (
+                      <p className="text-xs text-muted-foreground">
+                        Switching to derived clears the fixed list; switching back freezes
+                        whatever the preview currently shows.
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    These become the grid's columns, always in Monday-to-Sunday order.
-                    Removing a day removes it everywhere — admin, faculty and student views.
-                  </p>
-                </div>
+                </SectionCard>
 
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-4">
-                    <Label>Breaks</Label>
+                <SectionCard
+                  title="Working hours"
+                  description="The window a teaching day runs between, and the steps a derived day is walked in."
+                  icon={Clock}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <TimeField
+                      id="startTime"
+                      label="Day start"
+                      value={draft.startTime}
+                      onChange={(value) => setField("startTime", value)}
+                      hint={
+                        slotMode === "derived"
+                          ? "First period starts here."
+                          : "With a fixed slot list this only bounds where breaks may fall."
+                      }
+                    />
+                    <TimeField
+                      id="endTime"
+                      label="Day end"
+                      value={draft.endTime}
+                      onChange={(value) => setField("endTime", value)}
+                      hint={
+                        slotMode === "derived"
+                          ? "No period may end after this."
+                          : "With a fixed slot list this only bounds where breaks may fall."
+                      }
+                    />
+                    <NumberField
+                      id="periodDurationMin"
+                      label="Period duration (minutes)"
+                      limitKey="periodDurationMin"
+                      value={draft.periodDurationMin}
+                      onChange={(value) => setField("periodDurationMin", value)}
+                      disabled={slotMode === "explicit"}
+                      disabledReason="Only used when slots are derived. Switch Slot source to “Derive from working hours” to make this shape the day."
+                      hint="Length of every derived period."
+                    />
+                    <NumberField
+                      id="breakDurationMin"
+                      label="Gap between periods (minutes)"
+                      limitKey="breakDurationMin"
+                      value={draft.breakDurationMin}
+                      onChange={(value) => setField("breakDurationMin", value)}
+                      disabled={slotMode === "explicit"}
+                      disabledReason="Only used when slots are derived. Switch Slot source to “Derive from working hours” to make this shape the day."
+                      hint="Idle minutes inserted after each derived period. This is not the lunch break — add that below."
+                    />
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Working days"
+                  description="The grid's columns, always in Monday-to-Sunday order."
+                  icon={CalendarDays}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      {DAY_NAMES.map((day) => {
+                        const on = draft.workingDays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => {
+                              const next = on
+                                ? draft.workingDays.filter((d) => d !== day)
+                                : [...draft.workingDays, day];
+                              setField(
+                                "workingDays",
+                                DAY_NAMES.filter((d) => next.includes(d))
+                              );
+                            }}
+                            className={
+                              on
+                                ? "rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors"
+                                : "rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                            }
+                          >
+                            {day.slice(0, 3)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Removing a day removes it everywhere — admin, faculty and student
+                      views.
+                    </p>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Breaks"
+                  description="Protected windows no class may overlap."
+                  icon={Coffee}
+                  className="animate-in fade-in duration-200"
+                  actions={
                     <Button
                       type="button"
                       variant="outline"
@@ -1404,210 +1498,219 @@ export default function InfrastructurePage() {
                       <Plus className="size-4" />
                       Add break
                     </Button>
-                  </div>
-
-                  {draft.breaks.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                      No breaks. Nothing is protected: a derived day runs straight through,
-                      and classes may be placed at any hour of it.
-                    </p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {draft.breaks.map((brk, index) => (
-                        <div
-                          key={`break-row-${index}`}
-                          className="grid gap-2 rounded-lg border border-border p-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end"
-                        >
-                          <FieldShell id={`break-name-${index}`} label="Name">
-                            <Input
-                              id={`break-name-${index}`}
-                              value={brk.name}
-                              placeholder="Lunch"
-                              onChange={(event) => {
-                                const next = draft.breaks.slice();
-                                next[index] = { ...brk, name: event.target.value };
-                                setField("breaks", next);
-                              }}
-                            />
-                          </FieldShell>
-                          <FieldShell id={`break-start-${index}`} label="Start">
-                            <Input
-                              id={`break-start-${index}`}
-                              type="time"
-                              value={brk.start}
-                              onChange={(event) => {
-                                const next = draft.breaks.slice();
-                                next[index] = { ...brk, start: event.target.value };
-                                setField("breaks", next);
-                              }}
-                            />
-                          </FieldShell>
-                          <FieldShell id={`break-end-${index}`} label="End">
-                            <Input
-                              id={`break-end-${index}`}
-                              type="time"
-                              value={brk.end}
-                              onChange={(event) => {
-                                const next = draft.breaks.slice();
-                                next[index] = { ...brk, end: event.target.value };
-                                setField("breaks", next);
-                              }}
-                            />
-                          </FieldShell>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Remove ${brk.name || `break ${index + 1}`}`}
-                            onClick={() =>
-                              setField(
-                                "breaks",
-                                draft.breaks.filter((_, i) => i !== index)
-                              )
-                            }
+                  }
+                >
+                  <div className="flex flex-col gap-3">
+                    {draft.breaks.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                        No breaks. Nothing is protected: a derived day runs straight
+                        through, and classes may be placed at any hour of it.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {draft.breaks.map((brk, index) => (
+                          <div
+                            key={`break-row-${index}`}
+                            className="grid gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end"
                           >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    No class may overlap a break. A break must fall inside the day, and
-                    with a fixed slot list it must not cut across an existing period.
-                  </p>
-                </div>
+                            <FieldShell id={`break-name-${index}`} label="Name">
+                              <Input
+                                id={`break-name-${index}`}
+                                value={brk.name}
+                                placeholder="Lunch"
+                                onChange={(event) => {
+                                  const next = draft.breaks.slice();
+                                  next[index] = { ...brk, name: event.target.value };
+                                  setField("breaks", next);
+                                }}
+                              />
+                            </FieldShell>
+                            <FieldShell id={`break-start-${index}`} label="Start">
+                              <Input
+                                id={`break-start-${index}`}
+                                type="time"
+                                value={brk.start}
+                                onChange={(event) => {
+                                  const next = draft.breaks.slice();
+                                  next[index] = { ...brk, start: event.target.value };
+                                  setField("breaks", next);
+                                }}
+                              />
+                            </FieldShell>
+                            <FieldShell id={`break-end-${index}`} label="End">
+                              <Input
+                                id={`break-end-${index}`}
+                                type="time"
+                                value={brk.end}
+                                onChange={(event) => {
+                                  const next = draft.breaks.slice();
+                                  next[index] = { ...brk, end: event.target.value };
+                                  setField("breaks", next);
+                                }}
+                              />
+                            </FieldShell>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`Remove ${brk.name || `break ${index + 1}`}`}
+                              onClick={() =>
+                                setField(
+                                  "breaks",
+                                  draft.breaks.filter((_, i) => i !== index)
+                                )
+                              }
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      A break must fall inside the day, and with a fixed slot list it must
+                      not cut across an existing period.
+                    </p>
+                  </div>
+                </SectionCard>
 
-                <ErrorList errors={errors.hours} />
-                {saveError && activeTab === "hours" ? (
-                  <Callout tone="destructive" title="Save failed" icon={AlertTriangle}>
-                    {saveError}
-                  </Callout>
-                ) : null}
-
-                <SaveBar
+                <SaveCard
                   dirty={dirty.hours}
                   errors={errors.hours}
+                  saveError={activeTab === "hours" ? saveError : null}
                   saving={saving}
                   onSave={() => setConfirmOpen(true)}
                   onReset={() => resetTab("hours")}
                 />
-              </div>
+              </TabsContent>
 
-              <div className="lg:col-span-1">
-                <SchedulePreview
-                  grid={previewGrid}
-                  serverGrid={serverGrid}
-                  dirty={dirty.hours}
-                  slotMode={slotMode}
-                  fellBack={fellBack}
-                  capNote={
-                    dirty.general
-                      ? `General Policies has an unsaved max periods per day (${saved.maxPeriodsPerDay} → ${draft.maxPeriodsPerDay}). This preview uses the saved ${saved.maxPeriodsPerDay}, because saving this tab alone does not send that field.`
-                      : `Capped at ${saved.maxPeriodsPerDay} periods per day (General Policies).`
-                  }
-                />
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* ---------------- ADVANCED CONSTRAINTS ---------------- */}
-          <TabsContent value="advanced" className="pt-6">
-            <div className="flex flex-col gap-6">
-              <Callout tone="warning" title="Recorded, not yet enforced" icon={AlertTriangle}>
-                These four flags are stored in the system configuration and returned by{" "}
-                <code>GET /api/config/grid</code>, but no scheduler reads them today. The
-                penalties that would act on them are deliberately deferred. Changing them
-                will not change the timetable the generator produces.
-              </Callout>
-
-              <div className="grid gap-3">
-                <ToggleRow
-                  id="avoidFirstLastPeriod"
-                  label="Avoid first and last period"
-                  description="Preference for leaving the opening and closing period of a day free."
-                  enforcement="No penalty implemented — nothing reads this flag."
-                  checked={draft.avoidFirstLastPeriod}
-                  onCheckedChange={(value) => setField("avoidFirstLastPeriod", value)}
-                />
-                <ToggleRow
-                  id="preferMorningLabs"
-                  label="Prefer morning labs"
-                  description="Preference for placing lab sessions before the lunch break."
-                  enforcement="No penalty implemented — nothing reads this flag."
-                  checked={draft.preferMorningLabs}
-                  onCheckedChange={(value) => setField("preferMorningLabs", value)}
-                />
-                <ToggleRow
-                  id="balanceFacultyWorkload"
-                  label="Balance faculty workload"
-                  description="Preference for spreading teaching hours evenly across faculty."
-                  enforcement="Flag not read. Both engines already spread load unconditionally: the backtracking scheduler penalises hours already assigned, the genetic one penalises exceeding a faculty member's weekly cap."
-                  checked={draft.balanceFacultyWorkload}
-                  onCheckedChange={(value) => setField("balanceFacultyWorkload", value)}
-                />
-                <ToggleRow
-                  id="prioritizeFacultyPreferences"
-                  label="Prioritize faculty preferences"
-                  description="Preference for honouring each faculty member's preferred and avoided time slots."
-                  enforcement="Flag not read. Both engines already reward preferred slots and punish avoided ones on every run."
-                  checked={draft.prioritizeFacultyPreferences}
-                  onCheckedChange={(value) =>
-                    setField("prioritizeFacultyPreferences", value)
-                  }
-                />
-              </div>
-
-              <Callout tone="info" title="Constraint summary" icon={Info}>
-                <ul className="list-disc space-y-1 pl-4">
-                  <li>
-                    Grid in force: {serverGrid?.days?.length ?? 0} working days ×{" "}
-                    {serverGrid?.slots?.length ?? 0} periods ={" "}
-                    {(serverGrid?.days?.length ?? 0) * (serverGrid?.slots?.length ?? 0)}{" "}
-                    weekly slots, with{" "}
-                    {serverGrid?.breaks?.length ?? 0} protected break
-                    {(serverGrid?.breaks?.length ?? 0) === 1 ? "" : "s"}.
-                  </li>
-                  <li>
-                    Enforced while generating: room type and capacity, faculty and room
-                    availability, faculty specialization, each faculty member's weekly
-                    hour cap, one faculty per course, and no double-booking of a faculty
-                    member, a room or a student group.
-                  </li>
-                  <li>
-                    Enforced by the grid itself: {saved.weeksPerSemester} teaching weeks
-                    decide each course's weekly sessions, and no class can land on a break
-                    or outside a period.
-                  </li>
-                  <li>
-                    Scored after the fact: runs longer than {saved.maxConsecutiveHours}{" "}
-                    consecutive hours cost student-convenience points in the quality score.
-                  </li>
-                  <li>
-                    Recorded but inert: the four flags above, and max daily hours per
-                    faculty.
-                  </li>
-                </ul>
-              </Callout>
-
-              <ErrorList errors={errors.advanced} />
-              {saveError && activeTab === "advanced" ? (
-                <Callout tone="destructive" title="Save failed" icon={AlertTriangle}>
-                  {saveError}
+              {/* ---------------- ADVANCED CONSTRAINTS ---------------- */}
+              <TabsContent value="advanced" className="flex-col gap-5 data-[state=active]:flex">
+                <Callout tone="warning" title="Recorded, not yet enforced" icon={AlertTriangle}>
+                  These four flags are stored in the system configuration and returned by{" "}
+                  <code>GET /api/config/grid</code>, but no scheduler reads them today. The
+                  penalties that would act on them are deliberately deferred. Changing them
+                  will not change the timetable the generator produces.
                 </Callout>
-              ) : null}
 
-              <SaveBar
-                dirty={dirty.advanced}
-                errors={errors.advanced}
-                saving={saving}
-                onSave={() => setConfirmOpen(true)}
-                onReset={() => resetTab("advanced")}
+                <SectionCard
+                  title="Scheduling preferences"
+                  description="Stored on the system configuration and returned with the grid."
+                  icon={SlidersHorizontal}
+                  className="animate-in fade-in duration-200"
+                >
+                  <div className="flex flex-col">
+                    <ToggleRow
+                      id="avoidFirstLastPeriod"
+                      label="Avoid first and last period"
+                      description="Preference for leaving the opening and closing period of a day free."
+                      enforcement="No penalty implemented — nothing reads this flag."
+                      checked={draft.avoidFirstLastPeriod}
+                      onCheckedChange={(value) => setField("avoidFirstLastPeriod", value)}
+                    />
+                    <ToggleRow
+                      id="preferMorningLabs"
+                      label="Prefer morning labs"
+                      description="Preference for placing lab sessions before the lunch break."
+                      enforcement="No penalty implemented — nothing reads this flag."
+                      checked={draft.preferMorningLabs}
+                      onCheckedChange={(value) => setField("preferMorningLabs", value)}
+                    />
+                    <ToggleRow
+                      id="balanceFacultyWorkload"
+                      label="Balance faculty workload"
+                      description="Preference for spreading teaching hours evenly across faculty."
+                      enforcement="Flag not read. Both engines already spread load unconditionally: the backtracking scheduler penalises hours already assigned, the genetic one penalises exceeding a faculty member's weekly cap."
+                      checked={draft.balanceFacultyWorkload}
+                      onCheckedChange={(value) => setField("balanceFacultyWorkload", value)}
+                    />
+                    <ToggleRow
+                      id="prioritizeFacultyPreferences"
+                      label="Prioritize faculty preferences"
+                      description="Preference for honouring each faculty member's preferred and avoided time slots."
+                      enforcement="Flag not read. Both engines already reward preferred slots and punish avoided ones on every run."
+                      checked={draft.prioritizeFacultyPreferences}
+                      onCheckedChange={(value) =>
+                        setField("prioritizeFacultyPreferences", value)
+                      }
+                    />
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Constraint summary"
+                  description="What this configuration actually enforces, and where."
+                  icon={ShieldCheck}
+                  className="animate-in fade-in duration-200"
+                >
+                  <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+                    <li>
+                      <span className="font-medium text-foreground">Grid in force:</span>{" "}
+                      {serverGrid?.days?.length ?? 0} working days ×{" "}
+                      {serverGrid?.slots?.length ?? 0} periods ={" "}
+                      {(serverGrid?.days?.length ?? 0) * (serverGrid?.slots?.length ?? 0)}{" "}
+                      weekly slots, with {serverGrid?.breaks?.length ?? 0} protected break
+                      {(serverGrid?.breaks?.length ?? 0) === 1 ? "" : "s"}.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">
+                        Enforced while generating:
+                      </span>{" "}
+                      room type and capacity, faculty and room availability, faculty
+                      specialization, each faculty member's weekly hour cap, one faculty per
+                      course, and no double-booking of a faculty member, a room or a student
+                      group.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">
+                        Enforced by the grid itself:
+                      </span>{" "}
+                      {saved.weeksPerSemester} teaching weeks decide each course's weekly
+                      sessions, and no class can land on a break or outside a period.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">
+                        Scored after the fact:
+                      </span>{" "}
+                      runs longer than {saved.maxConsecutiveHours} consecutive hours cost
+                      student-convenience points in the quality score.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">Recorded but inert:</span>{" "}
+                      the four flags above, and max daily hours per faculty.
+                    </li>
+                  </ul>
+                </SectionCard>
+
+                <SaveCard
+                  dirty={dirty.advanced}
+                  errors={errors.advanced}
+                  saveError={activeTab === "advanced" ? saveError : null}
+                  saving={saving}
+                  onSave={() => setConfirmOpen(true)}
+                  onReset={() => resetTab("advanced")}
+                />
+              </TabsContent>
+            </div>
+
+            {/* ---- The grid a save would produce — watched while editing ---- */}
+            <div className="flex min-w-0 flex-col gap-5 xl:col-span-4">
+              <SchedulePreview
+                grid={previewGrid}
+                serverGrid={serverGrid}
+                dirty={dirty.hours}
+                slotMode={slotMode}
+                fellBack={fellBack}
+                capNote={
+                  dirty.general
+                    ? `General Policies has an unsaved max periods per day (${saved.maxPeriodsPerDay} → ${draft.maxPeriodsPerDay}). This preview uses the saved ${saved.maxPeriodsPerDay}, because saving this tab alone does not send that field.`
+                    : `Capped at ${saved.maxPeriodsPerDay} periods per day (General Policies).`
+                }
               />
             </div>
-          </TabsContent>
+          </div>
         </Tabs>
-      </SectionCard>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}

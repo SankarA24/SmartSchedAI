@@ -1,20 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { BookOpen, GraduationCap, Layers, SearchX } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  BookOpen,
+  CalendarDays,
+  Clock,
+  GraduationCap,
+  Layers,
+  SearchX,
+} from "lucide-react";
 
 import client from "@/lib/api";
 import { navForRole } from "@/lib/nav";
 import { useIdentity } from "@/hooks/useIdentity";
 import { AppShell, PageHeader } from "@/components/AppShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Callout } from "@/components/common/Callout";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SectionCard } from "@/components/common/SectionCard";
 import { StatCard } from "@/components/common/StatCard";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // =====================================================
-// /student-portal/courses — the student's own course list (U9 re-skin).
+// /student-portal/courses — the student's own course list (U9 re-skin,
+// re-laid out as a bento to match the admin Dashboard and the faculty
+// courses page).
 //
 // The shell, the layout and the styling are new; the data path is not.
 // Scoping rules carried over unchanged from the Phase 8 rescope:
@@ -27,6 +37,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 //   * there is no fallback of any kind — no default department, no default
 //     semester or academic year, and above all no "show the whole course
 //     catalogue when the cohort filter matches nothing".
+//
+// Layout:
+//   Band 1 — course cards (8/12) | cohort stats + cohort card + mix (4/12)
 // =====================================================
 
 const getId = (value) => {
@@ -70,39 +83,107 @@ const sameNumber = (a, b) => {
   return Number.isFinite(left) && Number.isFinite(right) && left === right;
 };
 
-/** One course, as a card. Replaces the old row-list renderer. */
+/**
+ * Eight fixed bar widths for the course-mix rows. Bucketed classes rather
+ * than a computed width because the page carries no inline styles — the
+ * same pattern the dashboard's occupancy heat row uses.
+ */
+const BAR_WIDTHS = [
+  "w-[10%]",
+  "w-1/5",
+  "w-[30%]",
+  "w-2/5",
+  "w-1/2",
+  "w-2/3",
+  "w-4/5",
+  "w-full",
+];
+
+function barWidth(value, max) {
+  if (!value || max <= 0) return BAR_WIDTHS[0];
+  const bucket = Math.ceil((value / max) * BAR_WIDTHS.length) - 1;
+  return BAR_WIDTHS[Math.min(Math.max(bucket, 0), BAR_WIDTHS.length - 1)];
+}
+
+const numberOrDash = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : "—";
+};
+
+/** One labelled tile inside a course card. Matches the faculty treatment. */
+function Fact({ label, value, numeric = false }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/40 p-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd
+        className={
+          numeric
+            ? "mt-1 text-sm text-foreground tabular-nums"
+            : "mt-1 truncate text-sm text-foreground"
+        }
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/** One row of the cohort card. */
+function CohortRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <dt className="shrink-0 text-sm text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate text-sm font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+/** One course, as a card — the faculty courses card, with student facts. */
 function CourseCard({ course }) {
   const title = course.name || course.title || course.courseName || "Course";
   const code = course.code || course.courseCode || null;
-  const credits = course.credits;
   const type = course.type || course.courseType || null;
+  const prerequisites = Array.isArray(course.prerequisites)
+    ? course.prerequisites.filter(Boolean)
+    : [];
 
   return (
-    <article className="flex animate-in flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-sm fade-in duration-150 transition-colors hover:border-primary/40">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold text-foreground">{title}</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{code || "No course code"}</p>
-        </div>
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <BookOpen className="size-4" />
-        </div>
-      </div>
+    <SectionCard
+      icon={BookOpen}
+      title={title}
+      description={code || "No course code"}
+      className="transition-colors hover:border-primary/40"
+      actions={
+        type ? <StatusBadge className="capitalize">{String(type)}</StatusBadge> : null
+      }
+    >
+      <div className="space-y-4">
+        <dl className="grid grid-cols-2 gap-3">
+          <Fact label="Credits" value={numberOrDash(course.credits)} numeric />
+          <Fact label="Hours per week" value={numberOrDash(course.hoursPerWeek)} numeric />
+          <Fact label="Semester" value={numberOrDash(course.semester)} numeric />
+          <Fact
+            label="Academic year"
+            value={course.academicYear ?? course.year ?? "Not specified"}
+          />
+        </dl>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">
-          {credits === undefined || credits === null || credits === "" ? "—" : credits} credits
-        </Badge>
-        {course.semester !== undefined && course.semester !== null && (
-          <Badge variant="outline">Semester {course.semester}</Badge>
+        {course.description && (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {course.description}
+          </p>
         )}
-        {type && <Badge variant="outline">{String(type)}</Badge>}
-      </div>
 
-      {course.description && (
-        <p className="text-sm leading-relaxed text-muted-foreground">{course.description}</p>
-      )}
-    </article>
+        {prerequisites.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <span className="text-xs text-muted-foreground">Prerequisites</span>
+            {prerequisites.map((item) => (
+              <StatusBadge key={String(item)}>{String(item)}</StatusBadge>
+            ))}
+          </div>
+        )}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -179,6 +260,37 @@ function MyCourses() {
     [list]
   );
 
+  const weeklyHours = useMemo(
+    () =>
+      list.reduce((total, course) => {
+        const value = Number(course.hoursPerWeek);
+        return Number.isFinite(value) ? total + value : total;
+      }, 0),
+    [list]
+  );
+
+  /**
+   * Courses by type, in a stable order so the rows never reshuffle between
+   * renders. Only types the cohort actually contains are listed — an empty
+   * category is not invented.
+   */
+  const mix = useMemo(() => {
+    const counts = new Map();
+    for (const course of list) {
+      const key = String(course.type || course.courseType || "unspecified").toLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const order = ["lecture", "lab", "seminar"];
+    const rows = [...counts.entries()].sort((a, b) => {
+      const left = order.indexOf(a[0]);
+      const right = order.indexOf(b[0]);
+      if (left !== right) return (left < 0 ? order.length : left) - (right < 0 ? order.length : right);
+      return a[0].localeCompare(b[0]);
+    });
+    const max = rows.reduce((peak, [, value]) => Math.max(peak, value), 0);
+    return { rows, max };
+  }, [list]);
+
   const cohort = [
     dept,
     sem !== null ? `Semester ${sem}` : null,
@@ -189,6 +301,10 @@ function MyCourses() {
 
   const { brand, nav, quickActions } = navForRole("student");
   const busy = identityLoading || loading;
+  // A failed fetch must never read as a zero: the figures fall back to an
+  // em dash and the list renders an empty state, with the Callout above.
+  const failed = Boolean(error);
+  const figure = (value) => (failed ? "—" : value);
 
   return (
     <AppShell
@@ -200,9 +316,17 @@ function MyCourses() {
       <PageHeader
         title="My Courses"
         description={cohort || "Courses assigned to your current semester"}
+        actions={
+          <Button variant="outline" asChild>
+            <Link to="/student-portal/timetable">
+              <CalendarDays className="size-4" />
+              View timetable
+            </Link>
+          </Button>
+        }
       />
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {error && (
           <Callout tone="destructive" title="Could not load courses">
             {error}
@@ -217,7 +341,7 @@ function MyCourses() {
 
         {!busy && !linked ? (
           <SectionCard
-            title="Course List"
+            title="Course list"
             description="No student record is linked to this account."
             icon={BookOpen}
           >
@@ -228,45 +352,39 @@ function MyCourses() {
             />
           </SectionCard>
         ) : (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard
-                label="Courses"
-                value={busy ? 0 : list.length}
-                icon={BookOpen}
-                loading={busy}
-              />
-              <StatCard
-                label="Total credits"
-                value={busy ? 0 : credits}
-                icon={Layers}
-                loading={busy}
-              />
-              <StatCard
-                label="Semester"
-                value={sem !== null ? sem : "—"}
-                icon={GraduationCap}
-                loading={busy}
-              />
-            </div>
-
+          <div className="grid gap-5 xl:grid-cols-12">
+            {/* ---- The cohort's courses: the page's primary cell ---- */}
             <SectionCard
-              title="Course List"
+              title="Course list"
               description={
                 busy
                   ? "Loading your courses…"
-                  : `${list.length} course${list.length !== 1 ? "s" : ""} in your cohort`
+                  : failed
+                    ? "The catalogue could not be reached"
+                    : `${list.length} course${list.length !== 1 ? "s" : ""} in your cohort`
               }
               icon={BookOpen}
+              className="xl:col-span-8"
+              actions={
+                busy || failed ? null : (
+                  <StatusBadge className="tabular-nums">{list.length}</StatusBadge>
+                )
+              }
             >
               {busy ? (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {[0, 1, 2].map((key) => (
-                    <Skeleton key={key} className="h-40 w-full rounded-xl" />
+                <div className="grid gap-4 md:grid-cols-2">
+                  {[0, 1, 2, 3].map((key) => (
+                    <Skeleton key={key} className="h-56 w-full rounded-xl" />
                   ))}
                 </div>
+              ) : failed ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="Courses unavailable"
+                  description="The course list could not be loaded. Reload the page to try again."
+                />
               ) : list.length ? (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2">
                   {list.map((course, index) => (
                     <CourseCard key={getId(course._id || course.id) || index} course={course} />
                   ))}
@@ -283,7 +401,102 @@ function MyCourses() {
                 />
               )}
             </SectionCard>
-          </>
+
+            {/* ---- The smaller cells: the numbers behind that list ---- */}
+            <div className="flex flex-col gap-5 xl:col-span-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <StatCard
+                  label="Courses"
+                  value={figure(list.length)}
+                  icon={BookOpen}
+                  loading={busy}
+                />
+                <StatCard
+                  label="Total credits"
+                  value={figure(credits)}
+                  icon={Layers}
+                  loading={busy}
+                />
+                <StatCard
+                  label="Hours per week"
+                  value={figure(weeklyHours)}
+                  icon={Clock}
+                  loading={busy}
+                />
+                <StatCard
+                  label="Semester"
+                  value={sem !== null ? sem : "—"}
+                  icon={GraduationCap}
+                  loading={busy}
+                />
+              </div>
+
+              <SectionCard
+                title="Your cohort"
+                description="Every course here is scoped to this record."
+                icon={GraduationCap}
+              >
+                {busy ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-5 w-full" />
+                    <Skeleton className="h-5 w-4/5" />
+                    <Skeleton className="h-5 w-2/3" />
+                  </div>
+                ) : (
+                  <dl className="divide-y divide-border">
+                    <CohortRow label="Department" value={dept || "Not on your record"} />
+                    <CohortRow
+                      label="Semester"
+                      value={sem !== null ? String(sem) : "Not on your record"}
+                    />
+                    <CohortRow
+                      label="Year"
+                      value={year !== null ? String(year) : "Not on your record"}
+                    />
+                  </dl>
+                )}
+              </SectionCard>
+
+              <SectionCard
+                title="Course mix"
+                description="How your courses split by type."
+                icon={Layers}
+              >
+                {busy ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ) : mix.rows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {failed
+                      ? "No breakdown while the course list is unavailable."
+                      : "Nothing to summarise yet."}
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {mix.rows.map(([key, value]) => (
+                      <div key={key} className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate text-sm capitalize text-foreground">
+                            {key}
+                          </span>
+                          <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+                            {value}
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full rounded-full bg-primary ${barWidth(value, mix.max)}`}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </div>
         )}
       </div>
     </AppShell>

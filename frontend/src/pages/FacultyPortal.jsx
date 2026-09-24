@@ -4,10 +4,12 @@ import {
   Bell,
   BookOpen,
   Building2,
+  CalendarCheck,
   CalendarDays,
   Clock,
   DoorOpen,
   GraduationCap,
+  Layers,
   Mail,
   MessageSquare,
   Send,
@@ -27,11 +29,11 @@ import { SectionCard } from "@/components/common/SectionCard";
 import { StatCard } from "@/components/common/StatCard";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Callout } from "@/components/common/Callout";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -41,6 +43,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
   The shell, the navigation, the theme toggle and logout all come from
   `AppShell` + `navForRole("faculty")`; this file owns no chrome of its own.
+
+  LAYOUT — a bento, matching pages/Dashboard.jsx (the canonical reference):
+    Band 1 — week strip (8 cols) | 2x2 stat grid (4 cols)
+    Tabs   — each tab is a 12-column bento of differently sized cards, one
+             idea per card, with the primary content in the wide cell.
+
+  COLOUR — semantic tokens only, same meanings as every other page:
+    primary      the one CTA, links, selected state
+    success      answered / resolved
+    warning      open, unread, approaching the weekly load ceiling
+    destructive  over the weekly load ceiling, failed fetch
+    muted        surfaces behind secondary content
+  Chart tokens are never used here as backgrounds; the only tints are alpha
+  washes of a semantic token (`bg-primary/10`, ...) carried by the shared
+  components, which stay legible in both themes.
 
   DATA SCOPING (unchanged by the re-skin, and the whole point of this page):
     - Identity comes from `useIdentity()` (GET /api/auth/me) — never from an
@@ -112,6 +129,37 @@ function readTabFromHash() {
   } catch {
     return TAB_IDS[0];
   }
+}
+
+/**
+ * One rule for the weekly-load colour, applied everywhere the percentage is
+ * shown: over the ceiling is destructive, close to it is warning, otherwise
+ * no colour at all. `null` means the faculty record carries no
+ * `maxHoursPerWeek`, so there is nothing to be over.
+ */
+function loadTone(percent) {
+  if (percent === null || percent === undefined) return "default";
+  if (percent >= 100) return "destructive";
+  if (percent >= 80) return "warning";
+  return "default";
+}
+
+/** Big figure + unit — the same shape the reference dashboard uses. */
+function BigFigure({ value, unit, tone = "default" }) {
+  return (
+    <p className="flex items-baseline gap-2">
+      <span
+        className={
+          tone === "warning"
+            ? "text-3xl font-semibold tracking-tight text-warning tabular-nums"
+            : "text-3xl font-semibold tracking-tight text-foreground tabular-nums"
+        }
+      >
+        {value}
+      </span>
+      <span className="text-sm text-muted-foreground">{unit}</span>
+    </p>
+  );
 }
 
 export default function FacultyPortal() {
@@ -280,6 +328,24 @@ export default function FacultyPortal() {
 
     return courses.filter((course) => ids.has(String(course._id)));
   }, [facultySchedule, courses]);
+
+  /**
+   * Course types across this faculty member's own courses. Purely a
+   * regrouping of `facultyCourses` — no extra request, and a course with no
+   * `type` is counted under "unspecified" rather than guessed at.
+   */
+  const courseMix = useMemo(() => {
+    const counts = new Map();
+
+    for (const course of facultyCourses) {
+      const key = String(course?.type || "unspecified").toLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .map(([type, value]) => ({ type, value }))
+      .sort((a, b) => b.value - a.value || a.type.localeCompare(b.type));
+  }, [facultyCourses]);
 
   // Lookup maps for the shared timetable components. `faculty` holds only
   // the signed-in member's own record — every entry on this page is theirs.
@@ -476,24 +542,32 @@ export default function FacultyPortal() {
   };
 
   // --------------------------------------------------
-  // Loading screen
+  // Loading screen — the bento's own silhouette, so the page does not
+  // reflow when the data lands.
   // --------------------------------------------------
 
   if (identityLoading || loading) {
     return (
       <AppShell {...shellProps}>
-        <div className="space-y-6">
+        <div className="space-y-5">
           <Skeleton className="h-9 w-64" />
 
-          <Skeleton className="h-32 w-full" />
+          <div className="grid gap-5 xl:grid-cols-12">
+            <Skeleton className="h-60 w-full rounded-xl xl:col-span-8" />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[...Array(4)].map((_, index) => (
-              <Skeleton key={index} className="h-24" />
-            ))}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:col-span-4">
+              {[...Array(4)].map((_, index) => (
+                <Skeleton key={index} className="h-28 rounded-xl" />
+              ))}
+            </div>
           </div>
 
-          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-10 w-full max-w-lg rounded-md" />
+
+          <div className="grid gap-5 xl:grid-cols-12">
+            <Skeleton className="h-72 w-full rounded-xl xl:col-span-4" />
+            <Skeleton className="h-72 w-full rounded-xl xl:col-span-8" />
+          </div>
         </div>
       </AppShell>
     );
@@ -568,20 +642,51 @@ export default function FacultyPortal() {
     },
   ];
 
+  // Descriptions computed once, so an empty week never reads as a zero.
+  const weekSummary =
+    totalWeeklyClasses === 0
+      ? "No published classes are assigned to you yet"
+      : `${totalWeeklyClasses} ${
+          totalWeeklyClasses === 1 ? "class" : "classes"
+        } · ${analytics.weeklyHours} hrs per week`;
+
+  const todaySummary =
+    todayClasses.length === 0
+      ? "Nothing scheduled"
+      : `${todayClasses.length} ${
+          todayClasses.length === 1 ? "class" : "classes"
+        } scheduled`;
+
+  const openQueries = queries.filter(
+    (query) => String(query?.status || "open") !== "answered"
+  ).length;
+
+  const answeredQueries = queries.length - openQueries;
+
+  const weeklyHoursValue = analytics.maxHours
+    ? `${analytics.weeklyHours} / ${analytics.maxHours}`
+    : analytics.weeklyHours;
+
+  const loadDelta =
+    analytics.loadPercent !== null ? `${analytics.loadPercent}%` : undefined;
+
+  const loadDeltaLabel =
+    analytics.loadPercent !== null ? "of max hours/week" : undefined;
+
   return (
     <AppShell {...shellProps}>
       <PageHeader
         title="Faculty Dashboard"
         description={`Welcome back, ${displayName}`}
         actions={
-          <Button asChild variant="outline" size="sm">
+          <Button asChild size="sm">
             <Link to="/faculty-portal/timetable">Open my timetable</Link>
           </Button>
         }
       />
 
-      {loadError ? (
-        <div className="mb-6">
+      <div className="space-y-5">
+        {loadError ? (
           <Callout
             tone="destructive"
             title="Unable to load your dashboard"
@@ -589,90 +694,81 @@ export default function FacultyPortal() {
           >
             {loadError}
           </Callout>
+        ) : null}
+
+        {/* ============ Band 1 — the week, and the four figures ============ */}
+
+        <div className="grid gap-5 xl:grid-cols-12">
+          <SectionCard
+            title="Week at a glance"
+            description={weekSummary}
+            icon={CalendarDays}
+            className="xl:col-span-8"
+          >
+            <WeekStrip
+              days={strip}
+              weekOffset={weekOffset}
+              onPrev={() => setWeekOffset((current) => current - 1)}
+              onNext={() => setWeekOffset((current) => current + 1)}
+              onToday={() => setWeekOffset(0)}
+              maps={maps}
+            />
+          </SectionCard>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:col-span-4 xl:content-start">
+            <StatCard
+              label="My courses"
+              value={facultyCourses.length}
+              icon={BookOpen}
+            />
+
+            <StatCard
+              label="Weekly classes"
+              value={totalWeeklyClasses}
+              icon={CalendarDays}
+              delta={todayClasses.length ? `${todayClasses.length}` : undefined}
+              deltaLabel={todayClasses.length ? `today (${todayName})` : undefined}
+            />
+
+            <StatCard
+              label="Weekly hours"
+              value={weeklyHoursValue}
+              icon={Clock}
+              tone={loadTone(analytics.loadPercent)}
+              delta={loadDelta}
+              deltaLabel={loadDeltaLabel}
+            />
+
+            <StatCard
+              label="Notifications"
+              value={unreadNotifications}
+              icon={Bell}
+              tone={unreadNotifications > 0 ? "warning" : "default"}
+              href="/faculty-portal/notifications"
+            />
+          </div>
         </div>
-      ) : null}
 
-      {/* ==================================================
-          WEEK AT A GLANCE — this faculty member's own entries
-      ================================================== */}
+        {/* ============ Tabs ============ */}
 
-      <WeekStrip
-        days={strip}
-        weekOffset={weekOffset}
-        onPrev={() => setWeekOffset((current) => current - 1)}
-        onNext={() => setWeekOffset((current) => current + 1)}
-        onToday={() => setWeekOffset(0)}
-        maps={maps}
-      />
+        <Tabs value={tab} onValueChange={handleTabChange} className="gap-5">
+          <TabsList variant="underline" className="w-full overflow-x-auto">
+            <TabsTrigger value="schedule">My Schedule</TabsTrigger>
+            <TabsTrigger value="courses">My Courses</TabsTrigger>
+            <TabsTrigger value="queries">Queries</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          </TabsList>
 
-      {/* ==================================================
-          STAT CARDS
-      ================================================== */}
+          {/* ---------------- My Schedule ---------------- */}
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="My Courses" value={facultyCourses.length} icon={BookOpen} />
-
-        <StatCard
-          label="Weekly Classes"
-          value={totalWeeklyClasses}
-          icon={CalendarDays}
-          delta={todayClasses.length ? `${todayClasses.length}` : undefined}
-          deltaLabel={todayClasses.length ? `today (${todayName})` : undefined}
-        />
-
-        <StatCard
-          label="Weekly Hours"
-          value={
-            analytics.maxHours
-              ? `${analytics.weeklyHours} / ${analytics.maxHours}`
-              : analytics.weeklyHours
-          }
-          icon={Clock}
-          tone={
-            analytics.loadPercent !== null && analytics.loadPercent >= 100
-              ? "warning"
-              : "default"
-          }
-          delta={
-            analytics.loadPercent !== null
-              ? `${analytics.loadPercent}%`
-              : undefined
-          }
-          deltaLabel={
-            analytics.loadPercent !== null ? "of max hours/week" : undefined
-          }
-        />
-
-        <StatCard
-          label="Notifications"
-          value={unreadNotifications}
-          icon={Bell}
-          href="/faculty-portal/notifications"
-        />
-      </div>
-
-      {/* ==================================================
-          TABS
-      ================================================== */}
-
-      <Tabs value={tab} onValueChange={handleTabChange} className="mt-6 gap-4">
-        <TabsList variant="underline" className="w-full overflow-x-auto">
-          <TabsTrigger value="schedule">My Schedule</TabsTrigger>
-          <TabsTrigger value="courses">My Courses</TabsTrigger>
-          <TabsTrigger value="queries">Queries</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
-        </TabsList>
-
-        {/* ---------------- My Schedule ---------------- */}
-
-        <TabsContent value="schedule" className="animate-in fade-in duration-150">
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            <div className="xl:col-span-1">
+          <TabsContent value="schedule" className="animate-in fade-in duration-200">
+            <div className="grid gap-5 xl:grid-cols-12">
               <SectionCard
                 title={`Today — ${todayName}`}
-                description="Your classes for today"
-                icon={CalendarDays}
+                description={todaySummary}
+                icon={Clock}
+                className="xl:col-span-4"
               >
                 {todayClasses.length === 0 ? (
                   <EmptyState
@@ -685,31 +781,36 @@ export default function FacultyPortal() {
                     {todayClasses.map((entry, index) => (
                       <div
                         key={`${entry.courseId}-${entry.startTime}-${index}`}
-                        className="rounded-md border border-border p-3 transition-colors duration-150 hover:bg-accent"
+                        className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-accent"
                       >
-                        <p className="text-sm font-medium text-foreground">
-                          {courseNameFor(entry)}
-                        </p>
+                        <div className="w-14 shrink-0 rounded-md bg-muted px-1 py-2 text-center font-mono text-xs tabular-nums text-muted-foreground">
+                          {entry.startTime}
+                        </div>
 
-                        <p className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                          {entry.startTime} - {entry.endTime}
-                        </p>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {courseNameFor(entry)}
+                          </p>
 
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {roomNameFor(entry)}
-                        </p>
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {roomNameFor(entry)}
+                          </p>
+
+                          <p className="mt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+                            {entry.startTime} – {entry.endTime}
+                          </p>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
               </SectionCard>
-            </div>
 
-            <div className="xl:col-span-2">
               <SectionCard
-                title="My Schedule"
+                title="My schedule"
                 description="Every class assigned to you across your published timetables"
-                icon={Clock}
+                icon={CalendarDays}
+                className="xl:col-span-8"
                 actions={
                   <Button asChild variant="outline" size="sm">
                     <Link to="/faculty-portal/timetable">Grid view</Link>
@@ -732,86 +833,132 @@ export default function FacultyPortal() {
                 )}
               </SectionCard>
             </div>
-          </div>
-        </TabsContent>
+          </TabsContent>
 
-        {/* ---------------- My Courses ---------------- */}
+          {/* ---------------- My Courses ---------------- */}
 
-        <TabsContent value="courses" className="animate-in fade-in duration-150">
-          <SectionCard
-            title="My Courses"
-            description="Derived from your own timetable entries — not the course catalogue"
-            icon={BookOpen}
-          >
-            {facultyCourses.length === 0 ? (
-              <EmptyState
-                icon={BookOpen}
-                title="No courses assigned"
-                description="Courses appear here once a published timetable assigns one of them to you."
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {facultyCourses.map((course) => {
-                  const sessions = facultySchedule.filter(
-                    (entry) =>
-                      String(entry.courseId || "") === String(course._id)
-                  ).length;
-
-                  return (
-                    <div
-                      key={course._id}
-                      className="rounded-lg border border-border bg-card p-4 transition-colors duration-150 hover:bg-accent"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-medium text-foreground">
-                          {course.name}
-                        </p>
-
-                        {course.type ? (
-                          <Badge variant="outline" className="capitalize">
-                            {course.type}
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <p className="mt-1 font-mono text-xs text-muted-foreground">
-                        {course.code || "—"}
-                      </p>
-
-                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        {course.department ? (
-                          <span>{course.department}</span>
-                        ) : null}
-                        {course.semester ? (
-                          <span>Semester {course.semester}</span>
-                        ) : null}
-                        <span>
-                          {sessions} {sessions === 1 ? "session" : "sessions"} /
-                          week
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </SectionCard>
-        </TabsContent>
-
-        {/* ---------------- Queries ----------------
-            Own queries only — the server scopes GET /api/queries to the
-            caller, and POST /api/queries takes the author from the token.
-        ------------------------------------------- */}
-
-        <TabsContent value="queries" className="animate-in fade-in duration-150">
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            <div className="xl:col-span-1">
+          <TabsContent value="courses" className="animate-in fade-in duration-200">
+            <div className="grid gap-5 xl:grid-cols-12">
               <SectionCard
-                title="Ask a Query"
-                description="Send a question to the administrator"
-                icon={MessageSquare}
+                title="My courses"
+                description="Derived from your own timetable entries — not the course catalogue"
+                icon={BookOpen}
+                className="xl:col-span-8"
               >
-                <form onSubmit={handleQuerySubmit} className="space-y-3">
+                {facultyCourses.length === 0 ? (
+                  <EmptyState
+                    icon={BookOpen}
+                    title="No courses assigned"
+                    description="Courses appear here once a published timetable assigns one of them to you."
+                  />
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {facultyCourses.map((course) => {
+                      const sessions = facultySchedule.filter(
+                        (entry) =>
+                          String(entry.courseId || "") === String(course._id)
+                      ).length;
+
+                      return (
+                        <div
+                          key={course._id}
+                          className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="min-w-0 text-sm font-medium text-foreground">
+                              {course.name}
+                            </p>
+
+                            {course.type ? (
+                              <StatusBadge className="shrink-0 capitalize">
+                                {course.type}
+                              </StatusBadge>
+                            ) : null}
+                          </div>
+
+                          <p className="mt-1 font-mono text-xs text-muted-foreground">
+                            {course.code || "—"}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+                            {course.department ? (
+                              <span className="truncate">{course.department}</span>
+                            ) : null}
+                            {course.semester ? (
+                              <span>Semester {course.semester}</span>
+                            ) : null}
+                            <span className="tabular-nums">
+                              {sessions} {sessions === 1 ? "session" : "sessions"} /
+                              week
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </SectionCard>
+
+              <SectionCard
+                title="Course mix"
+                description="How your assigned courses break down by type"
+                icon={Layers}
+                className="xl:col-span-4"
+              >
+                {facultyCourses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Course types appear here once a published timetable assigns a
+                    course to you.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <BigFigure
+                      value={facultyCourses.length}
+                      unit={`${
+                        facultyCourses.length === 1 ? "course" : "courses"
+                      } · ${totalWeeklyClasses} sessions/week`}
+                    />
+
+                    <div className="space-y-3 border-t border-border pt-4">
+                      {courseMix.map((row) => (
+                        <div key={row.type} className="space-y-1.5">
+                          <div className="flex items-baseline justify-between gap-3 text-xs">
+                            <span className="truncate capitalize text-foreground">
+                              {row.type}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {row.value}
+                            </span>
+                          </div>
+
+                          <Progress
+                            value={Math.round(
+                              (row.value / facultyCourses.length) * 100
+                            )}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </TabsContent>
+
+          {/* ---------------- Queries ----------------
+              Own queries only — the server scopes GET /api/queries to the
+              caller, and POST /api/queries takes the author from the token.
+          ------------------------------------------- */}
+
+          <TabsContent value="queries" className="animate-in fade-in duration-200">
+            <div className="grid gap-5 xl:grid-cols-12">
+              <SectionCard
+                title="Ask a query"
+                description="Send a question to the administrator"
+                icon={Send}
+                className="xl:col-span-4"
+              >
+                <form onSubmit={handleQuerySubmit} className="space-y-4">
                   <div className="space-y-1.5">
                     <Label htmlFor="query-subject">Subject</Label>
 
@@ -841,12 +988,10 @@ export default function FacultyPortal() {
                   ) : null}
 
                   {queryNotice ? (
-                    <p className="text-sm text-muted-foreground">
-                      {queryNotice}
-                    </p>
+                    <p className="text-sm text-success">{queryNotice}</p>
                   ) : null}
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end border-t border-border pt-4">
                     <Button type="submit" size="sm" disabled={querySubmitting}>
                       <Send className="size-4" />
                       {querySubmitting ? "Sending..." : "Send Query"}
@@ -854,13 +999,16 @@ export default function FacultyPortal() {
                   </div>
                 </form>
               </SectionCard>
-            </div>
 
-            <div className="xl:col-span-2">
               <SectionCard
-                title="My Queries"
-                description="Questions you raised and the administrator's replies"
+                title="My queries"
+                description={
+                  queries.length === 0
+                    ? "Questions you raised and the administrator's replies"
+                    : `${openQueries} open · ${answeredQueries} answered`
+                }
                 icon={MessageSquare}
+                className="xl:col-span-8"
               >
                 {queries.length === 0 ? (
                   <EmptyState
@@ -869,42 +1017,233 @@ export default function FacultyPortal() {
                     description="Questions you raise appear here with the administrator's reply."
                   />
                 ) : (
-                  <div className="space-y-2">
-                    {queries.map((query) => (
-                      <div
-                        key={query._id}
-                        className="rounded-md border border-border p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm font-medium text-foreground">
-                            {query.subject}
+                  <div className="space-y-3">
+                    {queries.map((query) => {
+                      const answered = query.status === "answered";
+
+                      return (
+                        <div
+                          key={query._id}
+                          className="rounded-xl border border-border p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="min-w-0 text-sm font-medium text-foreground">
+                              {query.subject}
+                            </p>
+
+                            <StatusBadge
+                              variant={answered ? "success" : "warning"}
+                              className="shrink-0"
+                            >
+                              {answered ? "Answered" : "Open"}
+                            </StatusBadge>
+                          </div>
+
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {query.message}
                           </p>
 
-                          <Badge
-                            variant={
-                              query.status === "answered"
-                                ? "default"
-                                : "secondary"
-                            }
-                          >
-                            {query.status === "answered" ? "Answered" : "Open"}
-                          </Badge>
+                          {query.reply ? (
+                            <div className="mt-3 rounded-lg border border-border bg-muted/50 p-3">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Administrator
+                              </p>
+
+                              <p className="mt-1 text-sm text-foreground">
+                                {query.reply}
+                              </p>
+                            </div>
+                          ) : null}
+
+                          {query.createdAt ? (
+                            <p className="mt-3 text-xs tabular-nums text-muted-foreground">
+                              {formatDateTime(query.createdAt)}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </TabsContent>
+
+          {/* ---------------- Analytics ---------------- */}
+
+          <TabsContent
+            value="analytics"
+            className="animate-in fade-in space-y-5 duration-200"
+          >
+            <div className="grid gap-5 xl:grid-cols-12">
+              <SectionCard
+                title="Classes per day"
+                description="Computed from your own published timetable entries"
+                icon={CalendarDays}
+                className="xl:col-span-7"
+              >
+                {facultySchedule.length === 0 ? (
+                  <EmptyState
+                    icon={CalendarDays}
+                    title="Nothing to measure yet"
+                    description="No published classes are assigned to you, so there is no weekly load to chart."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {analytics.perDay.map((row) => (
+                      <div key={row.day} className="flex items-center gap-3">
+                        <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">
+                          {row.day}
+                        </span>
+
+                        <Progress
+                          className="flex-1"
+                          value={
+                            analytics.maxSessionsInADay
+                              ? Math.round(
+                                  (row.sessions / analytics.maxSessionsInADay) *
+                                    100
+                                )
+                              : 0
+                          }
+                        />
+
+                        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          {row.sessions} {row.sessions === 1 ? "class" : "classes"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:col-span-5 xl:content-start">
+                <StatCard
+                  label="Weekly teaching hours"
+                  value={weeklyHoursValue}
+                  icon={Clock}
+                  tone={loadTone(analytics.loadPercent)}
+                  delta={loadDelta}
+                  deltaLabel={loadDeltaLabel}
+                />
+
+                <StatCard
+                  label="Sessions per teaching day"
+                  value={analytics.sessionsPerDay}
+                  icon={CalendarDays}
+                  delta={
+                    analytics.busiestDay
+                      ? `${analytics.busiestDay.sessions}`
+                      : undefined
+                  }
+                  deltaLabel={
+                    analytics.busiestDay
+                      ? `peak on ${analytics.busiestDay.day}`
+                      : undefined
+                  }
+                />
+
+                <StatCard
+                  label="Teaching days"
+                  value={analytics.teachingDays}
+                  icon={CalendarCheck}
+                />
+
+                <StatCard
+                  label="Rooms used"
+                  value={analytics.roomsUsed}
+                  icon={DoorOpen}
+                />
+              </div>
+            </div>
+
+            <SectionCard
+              title="Faculty information"
+              description="Your academic and professional details"
+              icon={User}
+            >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {facts.map((fact) => {
+                  const IconComponent = fact.icon;
+
+                  return (
+                    <div
+                      key={fact.id}
+                      className="flex items-center gap-3 rounded-xl border border-border p-4"
+                    >
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <IconComponent className="size-4" />
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">
+                          {fact.label}
+                        </p>
+
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {fact.value}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+          </TabsContent>
+
+          {/* ---------------- Notifications ----------------
+              GET /api/notifications is audience-scoped server-side; this tab
+              only renders what came back for this user.
+          ------------------------------------------------ */}
+
+          <TabsContent
+            value="notifications"
+            className="animate-in fade-in duration-200"
+          >
+            <div className="grid gap-5 xl:grid-cols-12">
+              <SectionCard
+                title="Notifications"
+                description="Announcements addressed to you"
+                icon={Bell}
+                className="xl:col-span-8"
+                actions={
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/faculty-portal/notifications">Open all</Link>
+                  </Button>
+                }
+              >
+                {notifications.length === 0 ? (
+                  <EmptyState
+                    icon={Bell}
+                    title="No notifications"
+                    description="Announcements addressed to faculty will appear here."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {notifications.slice(0, 10).map((notification) => (
+                      <div
+                        key={notification._id}
+                        className="rounded-xl border border-border p-4 transition-colors hover:bg-accent"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="min-w-0 text-sm font-medium text-foreground">
+                            {notification.title}
+                          </p>
+
+                          {notification.isRead ? null : (
+                            <StatusBadge variant="warning" className="shrink-0">
+                              New
+                            </StatusBadge>
+                          )}
                         </div>
 
                         <p className="mt-1 text-sm text-muted-foreground">
-                          {query.message}
+                          {notification.message}
                         </p>
 
-                        {query.reply ? (
-                          <p className="mt-2 rounded-md bg-muted p-2 text-sm text-foreground">
-                            <span className="font-medium">Admin: </span>
-                            {query.reply}
-                          </p>
-                        ) : null}
-
-                        {query.createdAt ? (
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {formatDateTime(query.createdAt)}
+                        {notification.createdAt ? (
+                          <p className="mt-3 text-xs tabular-nums text-muted-foreground">
+                            {formatDateTime(notification.createdAt)}
                           </p>
                         ) : null}
                       </div>
@@ -912,193 +1251,36 @@ export default function FacultyPortal() {
                   </div>
                 )}
               </SectionCard>
-            </div>
-          </div>
-        </TabsContent>
 
-        {/* ---------------- Analytics ---------------- */}
+              <SectionCard
+                title="Unread"
+                description="Across everything addressed to you"
+                className="xl:col-span-4"
+              >
+                <div className="space-y-3">
+                  <BigFigure
+                    value={unreadNotifications}
+                    unit="unread"
+                    tone={unreadNotifications > 0 ? "warning" : "default"}
+                  />
 
-        <TabsContent
-          value="analytics"
-          className="animate-in fade-in space-y-6 duration-150"
-        >
-          <SectionCard
-            title="Teaching Analytics"
-            description="Computed from your own published timetable entries"
-            icon={Clock}
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <StatCard
-                label="Weekly Teaching Hours"
-                value={
-                  analytics.maxHours
-                    ? `${analytics.weeklyHours} / ${analytics.maxHours}`
-                    : analytics.weeklyHours
-                }
-                icon={Clock}
-                tone={
-                  analytics.loadPercent !== null && analytics.loadPercent >= 100
-                    ? "destructive"
-                    : "default"
-                }
-                delta={
-                  analytics.loadPercent !== null
-                    ? `${analytics.loadPercent}%`
-                    : undefined
-                }
-                deltaLabel={
-                  analytics.loadPercent !== null
-                    ? "of max hours/week"
-                    : undefined
-                }
-              />
+                  <p className="text-xs tabular-nums text-muted-foreground">
+                    {notifications.length}{" "}
+                    {notifications.length === 1 ? "notification" : "notifications"}{" "}
+                    in total
+                  </p>
 
-              <StatCard
-                label="Sessions per Teaching Day"
-                value={analytics.sessionsPerDay}
-                icon={CalendarDays}
-                delta={
-                  analytics.busiestDay
-                    ? `${analytics.busiestDay.sessions}`
-                    : undefined
-                }
-                deltaLabel={
-                  analytics.busiestDay
-                    ? `peak on ${analytics.busiestDay.day}`
-                    : undefined
-                }
-              />
-
-              <StatCard
-                label="Rooms Used"
-                value={analytics.roomsUsed}
-                icon={DoorOpen}
-              />
-            </div>
-
-            {facultySchedule.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                No published classes are assigned to you yet, so there is
-                nothing to measure.
-              </p>
-            ) : (
-              <div className="mt-6 space-y-3">
-                {analytics.perDay.map((row) => (
-                  <div key={row.day} className="flex items-center gap-3">
-                    <span className="w-24 shrink-0 text-xs text-muted-foreground">
-                      {row.day}
-                    </span>
-
-                    <Progress
-                      className="flex-1"
-                      value={
-                        analytics.maxSessionsInADay
-                          ? Math.round(
-                              (row.sessions / analytics.maxSessionsInADay) * 100
-                            )
-                          : 0
-                      }
-                    />
-
-                    <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                      {row.sessions} {row.sessions === 1 ? "class" : "classes"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="Faculty Information"
-            description="Your academic and professional details"
-            icon={User}
-          >
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {facts.map((fact) => {
-                const IconComponent = fact.icon;
-
-                return (
-                  <div
-                    key={fact.id}
-                    className="flex items-center gap-3 rounded-md border border-border p-4"
-                  >
-                    <IconComponent className="size-4 shrink-0 text-muted-foreground" />
-
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">
-                        {fact.label}
-                      </p>
-
-                      <p className="truncate text-sm font-medium text-foreground">
-                        {fact.value}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-        </TabsContent>
-
-        {/* ---------------- Notifications ----------------
-            GET /api/notifications is audience-scoped server-side; this tab
-            only renders what came back for this user.
-        ------------------------------------------------ */}
-
-        <TabsContent
-          value="notifications"
-          className="animate-in fade-in duration-150"
-        >
-          <SectionCard
-            title="Notifications"
-            description="Announcements addressed to you"
-            icon={Bell}
-            actions={
-              <Button asChild variant="outline" size="sm">
-                <Link to="/faculty-portal/notifications">Open all</Link>
-              </Button>
-            }
-          >
-            {notifications.length === 0 ? (
-              <EmptyState
-                icon={Bell}
-                title="No notifications"
-                description="Announcements addressed to faculty will appear here."
-              />
-            ) : (
-              <div className="space-y-2">
-                {notifications.slice(0, 10).map((notification) => (
-                  <div
-                    key={notification._id}
-                    className="rounded-md border border-border p-3 transition-colors duration-150 hover:bg-accent"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-medium text-foreground">
-                        {notification.title}
-                      </p>
-
-                      {notification.isRead ? null : (
-                        <Badge variant="secondary">New</Badge>
-                      )}
-                    </div>
-
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {notification.message}
+                  {notifications.length > 10 ? (
+                    <p className="text-xs text-muted-foreground">
+                      The ten most recent are listed here.
                     </p>
-
-                    {notification.createdAt ? (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {formatDateTime(notification.createdAt)}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </SectionCard>
-        </TabsContent>
-      </Tabs>
+                  ) : null}
+                </div>
+              </SectionCard>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </AppShell>
   );
 }

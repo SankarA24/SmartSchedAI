@@ -2,18 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
-  BriefcaseBusiness,
+  Ban,
   Building2,
-  CalendarDays,
   CheckCircle2,
   Clock,
   GraduationCap,
+  IdCard,
+  ListChecks,
   Loader2,
   Mail,
   Pencil,
   Save,
   ShieldAlert,
-  User,
+  ThumbsUp,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -24,9 +26,11 @@ import useIdentity from "@/hooks/useIdentity";
 import { useSystemConfig } from "@/hooks/useSystemConfig";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
 import { SectionCard } from "@/components/common/SectionCard";
-import { Badge } from "@/components/ui/badge";
+import { StatCard } from "@/components/common/StatCard";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 
 // =========================================================
@@ -118,23 +122,55 @@ function buildAvailabilityDraft(availability, gridDays, gridSlots) {
   return draft;
 }
 
-/** One read-only key/value tile. */
-function DetailTile({ icon: Icon, label, value, mono = false }) {
-  return (
-    <div className="rounded-xl border border-border bg-muted/40 p-4">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        {Icon && <Icon className="size-4" />}
-        <span className="text-xs">{label}</span>
-      </div>
+// =========================================================
+// PRESENTATION
+//
+// Colour on this page carries exactly three meanings and nothing else:
+//   primary   a slot you are available to teach (the selected state)
+//   success   a slot you prefer                 (favoured by the scheduler)
+//   warning   a slot you would rather avoid     (penalised by the scheduler)
+// Each is an alpha wash of the semantic token with the solid token on top,
+// so it stays legible in both themes.
+// =========================================================
 
-      <p
+/** One read-only row of the identity card. */
+function DetailRow({ icon: Icon, label, value, mono = false }) {
+  return (
+    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <dt className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+        {Icon ? <Icon className="size-4 shrink-0" /> : null}
+        <span>{label}</span>
+      </dt>
+
+      <dd
         className={cn(
-          "mt-1.5 text-sm font-medium text-foreground",
-          mono && "break-all font-mono text-xs"
+          "min-w-0 text-sm font-medium break-words text-foreground sm:text-right",
+          mono && "font-mono text-xs break-all"
         )}
       >
         {value}
-      </p>
+      </dd>
+    </div>
+  );
+}
+
+/** One line of the legend card: tinted square, name, what it does. */
+function LegendRow({ icon: Icon, tone, title, children }) {
+  return (
+    <div className="flex items-start gap-3 py-3">
+      <div
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg",
+          tone
+        )}
+      >
+        {Icon ? <Icon className="size-4" /> : null}
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{children}</p>
+      </div>
     </div>
   );
 }
@@ -353,6 +389,28 @@ export default function FacultyProfile() {
   }, [facultyId, draftAvailability, draftPreferred, draftAvoided]);
 
   // ---------------------------------------------
+  // Derived figures — counted off whichever set is on screen (the draft
+  // while editing, the saved record otherwise) so the tiles never disagree
+  // with the panels beside them.
+  // ---------------------------------------------
+
+  const availableSlotCount = useMemo(() => {
+    let total = 0;
+    for (const day of gridDays) {
+      const dayKey = String(day).toLowerCase();
+      const windows = editing
+        ? draftAvailability?.[dayKey]
+        : savedAvailability[dayKey];
+      total += gridSlots.filter((slot) => coversSlot(windows, slot)).length;
+    }
+    return total;
+  }, [gridDays, gridSlots, editing, draftAvailability, savedAvailability]);
+
+  const gridSlotTotal = gridDays.length * gridSlots.length;
+  const shownPreferred = editing ? draftPreferred : savedPreferred;
+  const shownAvoided = editing ? draftAvoided : savedAvoided;
+
+  // ---------------------------------------------
   // Shell — shared sidebar/header, fed by lib/nav.js.
   // ---------------------------------------------
 
@@ -381,10 +439,20 @@ export default function FacultyProfile() {
   if (loading) {
     return (
       <AppShell {...shellProps}>
-        <div className="animate-in space-y-6 fade-in duration-150">
-          <div className="h-9 w-56 animate-pulse rounded-md bg-muted" />
-          <div className="h-40 animate-pulse rounded-xl bg-muted" />
-          <div className="h-72 animate-pulse rounded-xl bg-muted" />
+        <div className="animate-in space-y-5 fade-in duration-200">
+          <Skeleton className="h-9 w-56" />
+
+          <div className="grid gap-5 xl:grid-cols-12">
+            <div className="flex flex-col gap-5 xl:col-span-5">
+              <Skeleton className="h-64 w-full rounded-xl" />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Skeleton className="h-24 w-full rounded-xl sm:col-span-2" />
+                <Skeleton className="h-24 w-full rounded-xl" />
+                <Skeleton className="h-24 w-full rounded-xl" />
+              </div>
+            </div>
+            <Skeleton className="h-96 w-full rounded-xl xl:col-span-7" />
+          </div>
         </div>
       </AppShell>
     );
@@ -397,7 +465,9 @@ export default function FacultyProfile() {
       <AppShell {...shellProps}>
         <div className="flex min-h-[60vh] items-center justify-center">
           <div className="max-w-md text-center">
-            <ShieldAlert className="mx-auto mb-4 size-10 text-muted-foreground" />
+            <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-warning/10 text-warning">
+              <ShieldAlert className="size-6" />
+            </div>
 
             <h1 className="text-xl font-semibold text-foreground">
               Profile not linked — contact your administrator
@@ -423,6 +493,9 @@ export default function FacultyProfile() {
     ? faculty.specialization.join(", ")
     : "Not specified";
 
+  const department = faculty?.department || null;
+  const hasGrid = gridSlots.length > 0 && gridDays.length > 0;
+
   return (
     <AppShell
       {...shellProps}
@@ -431,310 +504,369 @@ export default function FacultyProfile() {
       <PageHeader
         title="My Profile"
         description="Your faculty record, and the availability the scheduler plans around."
+        actions={
+          editing ? (
+            <>
+              <Button variant="outline" onClick={cancelEditing} disabled={saving}>
+                <X className="size-4" />
+                Cancel
+              </Button>
+
+              <Button onClick={handleSave} disabled={saving || !facultyId}>
+                {saving ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                {saving ? "Saving..." : "Save changes"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={startEditing} disabled={!facultyId}>
+              <Pencil className="size-4" />
+              Edit availability
+            </Button>
+          )
+        }
       />
 
-      <div className="space-y-6">
-        <SectionCard>
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-            <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <User className="size-7" />
+      <div className="space-y-5">
+        {saveError && (
+          <Callout tone="destructive" title="Could not save" icon={AlertCircle}>
+            {saveError}
+          </Callout>
+        )}
+
+        {!editing && saveMessage && (
+          <Callout tone="success" title="Saved" icon={CheckCircle2}>
+            {saveMessage}
+          </Callout>
+        )}
+
+        {/* ============ Band 1 — identity | availability ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ---- Read-only identity, plus the three figures it explains ---- */}
+          <div className="flex flex-col gap-5 xl:col-span-5">
+            <SectionCard>
+              <div className="flex items-start gap-4">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <UserRound className="size-6" />
+                </div>
+
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold text-foreground">
+                    {displayName}
+                  </h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {department ? `Faculty · ${department}` : "Faculty member"}
+                  </p>
+                </div>
+              </div>
+
+              <dl className="mt-5 divide-y divide-border border-t border-border">
+                <DetailRow
+                  icon={Mail}
+                  label="Email"
+                  value={faculty?.email || "Not specified"}
+                />
+
+                <DetailRow
+                  icon={Building2}
+                  label="Department"
+                  value={department || "Not specified"}
+                />
+
+                <DetailRow
+                  icon={GraduationCap}
+                  label="Specialization"
+                  value={specialization}
+                />
+
+                <DetailRow
+                  icon={IdCard}
+                  label="Faculty ID"
+                  value={faculty?._id || facultyId || "—"}
+                  mono
+                />
+              </dl>
+            </SectionCard>
+
+            {/*
+              The wide tile carries the figure that matters — how much of the
+              grid this member can teach — with the two soft-constraint
+              counts beside each other under it.
+            */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <StatCard
+                label="Slots available"
+                value={
+                  hasGrid
+                    ? `${availableSlotCount} of ${gridSlotTotal}`
+                    : availableSlotCount
+                }
+                icon={Clock}
+                className="sm:col-span-2"
+              />
+              <StatCard
+                label="Preferred"
+                value={shownPreferred.length}
+                icon={ThumbsUp}
+                tone="success"
+              />
+              <StatCard
+                label="Avoided"
+                value={shownAvoided.length}
+                icon={Ban}
+                tone="warning"
+              />
             </div>
-
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-foreground">
-                {displayName}
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">Faculty member</p>
-            </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <DetailTile icon={User} label="Full name" value={displayName} />
+          {/* ---- Weekly availability (editable) ---- */}
+          <SectionCard
+            title="Weekly availability"
+            description={
+              editing
+                ? "Select a slot to switch it on or off."
+                : "The slots you are currently available to teach."
+            }
+            icon={Clock}
+            className="xl:col-span-7"
+          >
+            {!hasGrid ? (
+              <EmptyState
+                icon={Clock}
+                title="No teaching slots configured"
+                description="The timetable grid has no working days or periods yet, so there is nothing to mark availability against."
+              />
+            ) : (
+              <div className="divide-y divide-border">
+                {gridDays.map((day) => {
+                  const dayKey = String(day).toLowerCase();
 
-            <DetailTile
-              icon={Mail}
-              label="Email"
-              value={faculty?.email || "Not specified"}
-            />
+                  return (
+                    <div
+                      key={dayKey}
+                      className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4"
+                    >
+                      <p className="shrink-0 text-sm font-medium text-foreground sm:w-24">
+                        {day}
+                      </p>
 
-            <DetailTile
-              icon={Building2}
-              label="Department"
-              value={faculty?.department || "Not specified"}
-            />
+                      <div className="flex flex-wrap gap-2">
+                        {gridSlots.map((slot) => {
+                          const label = slotLabel(slot);
 
-            <DetailTile
-              icon={GraduationCap}
-              label="Specialization"
-              value={specialization}
-            />
-          </div>
-        </SectionCard>
+                          const active = editing
+                            ? (draftAvailability?.[dayKey] || []).some(
+                                (window) =>
+                                  window.start === slot.start &&
+                                  window.end === slot.end
+                              )
+                            : coversSlot(savedAvailability[dayKey], slot);
 
-        <SectionCard
-          title="Professional details"
-          description="Additional faculty information held on your record."
-          icon={BriefcaseBusiness}
-        >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <DetailTile
-              icon={BriefcaseBusiness}
-              label="Faculty ID"
-              value={faculty?._id || facultyId || "—"}
-              mono
-            />
+                          const className = cn(
+                            "rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-150",
+                            active
+                              ? "border-primary/30 bg-primary/10 text-primary"
+                              : "border-border bg-background text-muted-foreground"
+                          );
 
-            <DetailTile
-              icon={Building2}
-              label="Department"
-              value={faculty?.department || "Not specified"}
-            />
+                          if (!editing) {
+                            return (
+                              <span key={label} className={className}>
+                                {label}
+                              </span>
+                            );
+                          }
 
-            <DetailTile
-              icon={GraduationCap}
-              label="Specialization"
-              value={specialization}
-            />
-          </div>
-        </SectionCard>
+                          return (
+                            <button
+                              key={label}
+                              type="button"
+                              onClick={() =>
+                                toggleAvailabilitySlot(dayKey, slot)
+                              }
+                              aria-pressed={active}
+                              className={cn(
+                                className,
+                                "hover:border-primary/50"
+                              )}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </div>
 
-        {/* ==================================================
-            AVAILABILITY  (editable)
+        {/* ============ Band 2 — preferences | legend ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ==================================================
+              TEACHING PREFERENCES  (editable)
 
-            The only fields a faculty member may change are availability
-            and preferences — `PUT /api/faculty/:id` keeps nothing else
-            off a faculty caller's body. Name, email and department stay
-            read-only above.
-        ================================================== */}
+              The only fields a faculty member may change are availability
+              and preferences — `PUT /api/faculty/:id` keeps nothing else
+              off a faculty caller's body. Name, email and department stay
+              read-only in the identity card above.
+          ================================================== */}
+          <SectionCard
+            title="Teaching preferences"
+            description="Soft constraints: the scheduler favours preferred slots and penalises avoided ones."
+            icon={ListChecks}
+            className="xl:col-span-8"
+          >
+            {!hasGrid ? (
+              <EmptyState
+                icon={ListChecks}
+                title="No teaching slots configured"
+                description="Preferences are expressed against the grid's periods, and none are defined yet."
+              />
+            ) : editing ? (
+              <div className="divide-y divide-border">
+                {gridSlots.map((slot) => {
+                  const label = slotLabel(slot);
+                  const preferred = draftPreferred.includes(label);
+                  const avoided = draftAvoided.includes(label);
 
-        <SectionCard
-          title="Availability & preferences"
-          description="The slots you can teach, and the ones you would rather teach or avoid."
-          icon={Clock}
-          actions={
-            editing ? (
-              <div className="flex items-center gap-2">
-                <Button onClick={handleSave} disabled={saving || !facultyId}>
-                  {saving ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Save className="size-4" />
-                  )}
-                  {saving ? "Saving..." : "Save changes"}
-                </Button>
+                  return (
+                    <div
+                      key={label}
+                      className="flex flex-wrap items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <span className="text-sm text-foreground tabular-nums">
+                        {label}
+                      </span>
 
-                <Button variant="outline" onClick={cancelEditing} disabled={saving}>
-                  <X className="size-4" />
-                  Cancel
-                </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => togglePreference(label, "preferred")}
+                          aria-pressed={preferred}
+                          className={cn(
+                            preferred &&
+                              "border-success/30 bg-success/10 text-success hover:bg-success/15 hover:text-success"
+                          )}
+                        >
+                          <ThumbsUp className="size-3.5" />
+                          Prefer
+                        </Button>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => togglePreference(label, "avoid")}
+                          aria-pressed={avoided}
+                          className={cn(
+                            avoided &&
+                              "border-warning/30 bg-warning/10 text-warning hover:bg-warning/15 hover:text-warning"
+                          )}
+                        >
+                          <Ban className="size-3.5" />
+                          Avoid
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <Button variant="outline" onClick={startEditing} disabled={!facultyId}>
-                <Pencil className="size-4" />
-                Edit
-              </Button>
-            )
-          }
-        >
-          <div className="space-y-6">
-            {saveError && (
-              <Callout tone="destructive" title="Could not save" icon={AlertCircle}>
-                {saveError}
-              </Callout>
-            )}
+              <div className="divide-y divide-border">
+                <div className="pb-4">
+                  <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <ThumbsUp className="size-3.5" />
+                    Preferred slots
+                  </p>
 
-            {!editing && saveMessage && (
-              <Callout tone="success" title="Saved" icon={CheckCircle2}>
-                {saveMessage}
-              </Callout>
-            )}
-
-            {/* Weekly availability */}
-
-            <section className="space-y-3">
-              <div>
-                <h3 className="text-sm font-medium text-foreground">
-                  Weekly availability
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {editing
-                    ? "Select a slot to switch it on or off."
-                    : "Slots you are currently available to teach."}
-                </p>
-              </div>
-
-              {gridSlots.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  The timetable grid has no teaching slots configured.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {gridDays.map((day) => {
-                    const dayKey = String(day).toLowerCase();
-
-                    return (
-                      <div
-                        key={dayKey}
-                        className="rounded-xl border border-border bg-muted/40 p-4"
-                      >
-                        <p className="mb-3 text-sm font-medium text-foreground">
-                          {day}
-                        </p>
-
-                        <div className="flex flex-wrap gap-2">
-                          {gridSlots.map((slot) => {
-                            const label = slotLabel(slot);
-
-                            const active = editing
-                              ? (draftAvailability?.[dayKey] || []).some(
-                                  (window) =>
-                                    window.start === slot.start &&
-                                    window.end === slot.end
-                                )
-                              : coversSlot(savedAvailability[dayKey], slot);
-
-                            const className = cn(
-                              "rounded-md border px-3 py-1.5 text-xs font-medium tabular-nums transition-colors duration-150",
-                              active
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border bg-background text-muted-foreground"
-                            );
-
-                            if (!editing) {
-                              return (
-                                <span key={label} className={className}>
-                                  {label}
-                                </span>
-                              );
-                            }
-
-                            return (
-                              <button
-                                key={label}
-                                type="button"
-                                onClick={() =>
-                                  toggleAvailabilitySlot(dayKey, slot)
-                                }
-                                aria-pressed={active}
-                                className={cn(
-                                  className,
-                                  "hover:border-primary hover:text-foreground"
-                                )}
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            {/* Teaching preferences */}
-
-            <section className="space-y-3">
-              <div>
-                <h3 className="text-sm font-medium text-foreground">
-                  Teaching preferences
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Soft constraints: the scheduler favours preferred slots and
-                  penalises avoided ones.
-                </p>
-              </div>
-
-              {editing ? (
-                <div className="space-y-2">
-                  {gridSlots.map((slot) => {
-                    const label = slotLabel(slot);
-                    const preferred = draftPreferred.includes(label);
-                    const avoided = draftAvoided.includes(label);
-
-                    return (
-                      <div
-                        key={label}
-                        className="flex items-center justify-between gap-4 rounded-xl border border-border bg-muted/40 p-3"
-                      >
-                        <span className="text-sm text-foreground tabular-nums">
+                  {savedPreferred.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      None set
+                    </p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {savedPreferred.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-md border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-medium text-success tabular-nums"
+                        >
                           {label}
                         </span>
-
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={preferred ? "default" : "outline"}
-                            onClick={() => togglePreference(label, "preferred")}
-                            aria-pressed={preferred}
-                          >
-                            Prefer
-                          </Button>
-
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={avoided ? "secondary" : "outline"}
-                            onClick={() => togglePreference(label, "avoid")}
-                            aria-pressed={avoided}
-                          >
-                            Avoid
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-border bg-muted/40 p-4">
-                    <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarDays className="size-4" />
-                      Preferred slots
+
+                <div className="pt-4">
+                  <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Ban className="size-3.5" />
+                    Slots to avoid
+                  </p>
+
+                  {savedAvoided.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      None set
                     </p>
-
-                    {savedPreferred.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">None set</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {savedPreferred.map((label) => (
-                          <Badge key={label} className="tabular-nums">
-                            {label}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-muted/40 p-4">
-                    <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarDays className="size-4" />
-                      Slots to avoid
-                    </p>
-
-                    {savedAvoided.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">None set</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {savedAvoided.map((label) => (
-                          <Badge
-                            key={label}
-                            variant="outline"
-                            className="tabular-nums"
-                          >
-                            {label}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {savedAvoided.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning tabular-nums"
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </section>
-          </div>
-        </SectionCard>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* ---- What each marking means to the scheduler ---- */}
+          <SectionCard
+            title="How the scheduler reads this"
+            className="xl:col-span-4"
+          >
+            <div className="divide-y divide-border">
+              <LegendRow
+                icon={Clock}
+                tone="bg-primary/10 text-primary"
+                title="Available"
+              >
+                A hard constraint. No class is ever placed outside these
+                slots.
+              </LegendRow>
+
+              <LegendRow
+                icon={ThumbsUp}
+                tone="bg-success/10 text-success"
+                title="Preferred"
+              >
+                A soft constraint. The scheduler is rewarded for using these
+                slots first.
+              </LegendRow>
+
+              <LegendRow
+                icon={Ban}
+                tone="bg-warning/10 text-warning"
+                title="Avoided"
+              >
+                A soft constraint. Used only when nothing else fits, at a
+                penalty.
+              </LegendRow>
+            </div>
+          </SectionCard>
+        </div>
       </div>
     </AppShell>
   );

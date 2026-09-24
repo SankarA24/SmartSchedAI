@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Bell,
+  BellOff,
   Check,
   CheckCircle2,
   Info,
+  Inbox,
+  Lock,
   MessageSquare,
   Plus,
   Radio,
@@ -39,29 +42,41 @@ import { cn } from "@/lib/utils";
 // =====================================================
 // /notifications — admin notification feed + query inbox (U9)
 //
-// Re-skin plus one behavioural addition. Unchanged: the notification CRUD
+// Visual pass only. Unchanged: the notification CRUD
 // (`GET/POST /api/notifications`, `PUT /api/notifications/:id/read`,
 // `DELETE /api/notifications/:id`) and the admin query inbox
-// (`GET /api/queries`, `PUT /api/queries/:id/reply`) carried over verbatim
-// from the previous version of this page — replying is still the only way a
-// query leaves status "open", and the reply notification is addressed to the
-// author alone (`recipientUserId`, never a role audience), so no other
-// faculty member or student ever reads the subject or the answer.
+// (`GET /api/queries`, `PUT /api/queries/:id/reply`) — replying is still the
+// only way a query leaves status "open", and the reply notification is
+// addressed to the author alone (`recipientUserId`, never a role audience),
+// so no other faculty member or student ever reads the subject or the answer.
 //
-// Added: the unread count is now live. `useSocket` gives us the shared
-// connection, and `backend/utils/notify.js#createAndEmit` emits the saved
-// document as a "notification" event into the caller's role room
-// (`role:admin`) or private user room. Prepending it to the list feeds the
-// same derived `unreadCount` that drives the header bell and the sidebar
-// badge, so a notification raised by a generation run or a query shows up
-// without a refresh.
+// The unread count is live. `useSocket` gives us the shared connection, and
+// `backend/utils/notify.js#createAndEmit` emits the saved document as a
+// "notification" event into the caller's role room (`role:admin`) or private
+// user room. Prepending it to the list feeds the same derived `unreadCount`
+// that drives the header bell and the sidebar badge, so a notification raised
+// by a generation run or a query shows up without a refresh.
+//
+// Layout — a bento of three jobs, one per cell, matching Dashboard.jsx:
+//   Band 1 — notification feed (8/12) | counts + compose (4/12)
+//   Band 2 — query inbox (8/12)       | reply status + delivery note (4/12)
+//
+// Colour is semantic only: primary for actions and info, success for
+// answered/read, warning for pending, destructive for errors. Tinted surfaces
+// are alpha washes of those tokens (bg-*/10) with the solid token on top, so
+// they stay legible in both themes.
 // =====================================================
 
+/**
+ * Notification type → icon plus the wash/solid pair for its icon tile.
+ * The wash sits over whatever the card colour currently is, so the same
+ * class works in light and dark.
+ */
 const NOTIFICATION_TONES = {
-  error: { icon: AlertTriangle, accent: "border-l-destructive", variant: "destructive" },
-  warning: { icon: AlertTriangle, accent: "border-l-warning", variant: "warning" },
-  success: { icon: CheckCircle2, accent: "border-l-success", variant: "success" },
-  info: { icon: Info, accent: "border-l-primary", variant: "info" },
+  error: { icon: AlertTriangle, tile: "bg-destructive/10 text-destructive", variant: "destructive" },
+  warning: { icon: AlertTriangle, tile: "bg-warning/10 text-warning", variant: "warning" },
+  success: { icon: CheckCircle2, tile: "bg-success/10 text-success", variant: "success" },
+  info: { icon: Info, tile: "bg-primary/10 text-primary", variant: "info" },
 };
 
 function toneFor(type) {
@@ -80,6 +95,36 @@ function byNewestFirst(a, b) {
 
 function emptyForm() {
   return { title: "", message: "", type: "info", priority: "low" };
+}
+
+const DATETIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : DATETIME_FORMAT.format(date);
+}
+
+/** Big figure + unit — the same shape the dashboard's summary cells use. */
+function BigFigure({ value, unit, tone = "default" }) {
+  return (
+    <p className="flex items-baseline gap-2">
+      <span
+        className={cn(
+          "text-3xl font-semibold tracking-tight tabular-nums",
+          tone === "warning" ? "text-warning" : "text-foreground"
+        )}
+      >
+        {value}
+      </span>
+      <span className="text-sm text-muted-foreground">{unit}</span>
+    </p>
+  );
 }
 
 export default function NotificationsPage() {
@@ -246,6 +291,7 @@ export default function NotificationsPage() {
     () => queries.filter((q) => q.status !== "answered").length,
     [queries]
   );
+  const answeredQueryCount = queries.length - openQueryCount;
 
   // The sidebar badge is the same live count as the header bell.
   const navWithBadges = useMemo(
@@ -285,323 +331,426 @@ export default function NotificationsPage() {
         }
       />
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {feedError && (
           <Callout tone="destructive" title="Something went wrong">
             {feedError}
           </Callout>
         )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Notifications" value={notifications.length} icon={Bell} loading={loading} />
-          <StatCard
-            label="Unread"
-            value={unreadCount}
-            icon={Bell}
-            tone={unreadCount > 0 ? "warning" : "default"}
-            loading={loading}
-          />
-          <StatCard
-            label="Queries awaiting a reply"
-            value={openQueryCount}
-            icon={MessageSquare}
-            tone={openQueryCount > 0 ? "destructive" : "success"}
-            loading={queriesLoading}
-          />
-        </div>
-
-        {showForm && (
+        {/* ============ Band 1 — the feed, and what feeds it ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ---- Notification feed: the page's primary content ---- */}
           <SectionCard
-            title="Create a notification"
-            description="This is broadcast to every portal that is an audience for it."
-            icon={Plus}
-            className="animate-in fade-in duration-200"
+            title="Notification feed"
+            description={
+              loading
+                ? "Loading the feed…"
+                : `${notifications.length} total · ${unreadCount} unread`
+            }
+            icon={Bell}
+            className="animate-in fade-in duration-200 xl:col-span-8"
+            actions={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMarkAllRead}
+                disabled={unreadCount === 0}
+              >
+                Mark all as read
+              </Button>
+            }
           >
-            <form onSubmit={handleSubmitNotification} className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="notification-type">Type</Label>
-                  <Select
-                    value={formData.type}
-                    onValueChange={(value) => setFormData({ ...formData, type: value })}
-                  >
-                    <SelectTrigger id="notification-type" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="info">Info</SelectItem>
-                      <SelectItem value="success">Success</SelectItem>
-                      <SelectItem value="warning">Warning</SelectItem>
-                      <SelectItem value="error">Error</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notification-priority">Priority</Label>
-                  <Select
-                    value={formData.priority}
-                    onValueChange={(value) => setFormData({ ...formData, priority: value })}
-                  >
-                    <SelectTrigger id="notification-priority" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            {loading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, index) => (
+                  <Skeleton key={index} className="h-20 w-full rounded-lg" />
+                ))}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notification-title">Title</Label>
-                <Input
-                  id="notification-title"
-                  value={formData.title}
-                  onChange={(event) => setFormData({ ...formData, title: event.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notification-message">Message</Label>
-                <Textarea
-                  id="notification-message"
-                  value={formData.message}
-                  onChange={(event) => setFormData({ ...formData, message: event.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Button type="submit" disabled={formLoading}>
-                  {formLoading ? "Sending..." : "Send notification"}
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </SectionCard>
-        )}
-
-        <SectionCard
-          title="Notification feed"
-          description={`${notifications.length} total. ${unreadCount} unread.`}
-          icon={Bell}
-          actions={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleMarkAllRead}
-              disabled={unreadCount === 0}
-            >
-              Mark all as read
-            </Button>
-          }
-        >
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, index) => (
-                <Skeleton key={index} className="h-20 w-full rounded-lg" />
-              ))}
-            </div>
-          ) : notifications.length === 0 ? (
-            <EmptyState
-              icon={Bell}
-              title="All caught up"
-              description="There are no notifications right now."
-            />
-          ) : (
-            <div className="space-y-3">
-              {notifications.map((notification) => {
-                const tone = toneFor(notification.type);
-                const ToneIcon = tone.icon;
-                return (
-                  <div
-                    key={notification._id}
-                    className={cn(
-                      "flex animate-in items-start justify-between gap-4 rounded-lg border border-border border-l-2 bg-card p-4 transition-colors fade-in duration-150",
-                      notification.isRead ? "border-l-border opacity-80" : tone.accent
-                    )}
-                  >
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <div
-                        className={cn(
-                          "mt-0.5 shrink-0",
-                          notification.isRead ? "text-muted-foreground" : "text-foreground"
-                        )}
-                      >
-                        <ToneIcon className="size-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex flex-wrap items-center gap-2">
-                          <p
-                            className={cn(
-                              "font-medium",
-                              notification.isRead ? "text-muted-foreground" : "text-foreground"
-                            )}
-                          >
-                            {notification.title}
-                          </p>
-                          <StatusBadge
-                            variant={PRIORITY_VARIANTS[notification.priority] || "neutral"}
-                            className="capitalize"
-                          >
-                            {notification.priority}
-                          </StatusBadge>
-                          {!notification.isRead && (
-                            <StatusBadge variant="info">New</StatusBadge>
+            ) : notifications.length === 0 ? (
+              <EmptyState
+                icon={BellOff}
+                title="All caught up"
+                description="There are no notifications right now."
+              />
+            ) : (
+              <div className="space-y-3">
+                {notifications.map((notification) => {
+                  const tone = toneFor(notification.type);
+                  const ToneIcon = tone.icon;
+                  const read = Boolean(notification.isRead);
+                  return (
+                    <div
+                      key={notification._id}
+                      className={cn(
+                        "flex animate-in flex-col gap-3 rounded-lg border border-border p-4 transition-colors fade-in duration-200 sm:flex-row sm:items-start sm:justify-between sm:gap-4",
+                        read ? "bg-muted/40" : "bg-card hover:border-primary/40"
+                      )}
+                    >
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <div
+                          className={cn(
+                            "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                            read ? "bg-muted text-muted-foreground" : tone.tile
                           )}
+                        >
+                          <ToneIcon className="size-4" />
                         </div>
-                        <p className="text-sm text-muted-foreground">{notification.message}</p>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {notification.createdAt
-                            ? new Date(notification.createdAt).toLocaleString()
-                            : ""}
-                        </p>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
+                            <p
+                              className={cn(
+                                "font-medium",
+                                read ? "text-muted-foreground" : "text-foreground"
+                              )}
+                            >
+                              {notification.title}
+                            </p>
+                            <StatusBadge
+                              variant={PRIORITY_VARIANTS[notification.priority] || "neutral"}
+                              className="capitalize"
+                            >
+                              {notification.priority}
+                            </StatusBadge>
+                            {!read && <StatusBadge variant="info">New</StatusBadge>}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {notification.message}
+                          </p>
+                          <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+                            {formatDateTime(notification.createdAt) || ""}
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex shrink-0 items-center gap-1">
-                      {!notification.isRead && (
+                      <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
+                        {!read && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label="Mark as read"
+                            onClick={() => handleMarkAsRead(notification._id)}
+                          >
+                            <Check className="size-4" />
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
-                          aria-label="Mark as read"
-                          onClick={() => handleMarkAsRead(notification._id)}
+                          aria-label="Delete notification"
+                          className="text-muted-foreground transition-colors hover:text-destructive"
+                          onClick={() => setNotificationToDelete(notification)}
                         >
-                          <Check className="size-4" />
+                          <Trash2 className="size-4" />
                         </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label="Delete notification"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setNotificationToDelete(notification)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </SectionCard>
-
-        {/* Queries raised by faculty and students. Answering one is the only
-            way a query leaves status "open" — PUT /api/queries/:id/reply had
-            no caller before this. The reply notification goes to the author
-            alone (recipientUserId, no role audience), so no other faculty
-            member or student ever reads the subject or the answer. */}
-        <SectionCard
-          title="Queries"
-          description={`${queries.length} total. ${openQueryCount} awaiting a reply.`}
-          icon={MessageSquare}
-        >
-          <div className="space-y-4">
-            {queriesError && (
-              <Callout tone="destructive" title="Something went wrong">
-                {queriesError}
-              </Callout>
-            )}
-
-            {queriesLoading ? (
-              <div className="space-y-3">
-                {[...Array(2)].map((_, index) => (
-                  <Skeleton key={index} className="h-24 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : queries.length === 0 ? (
-              <EmptyState
-                icon={MessageSquare}
-                title="No queries raised"
-                description="Faculty and students can raise a query from their portal."
-              />
-            ) : (
-              <div className="space-y-4">
-                {queries.map((query) => {
-                  const answered = query.status === "answered";
-                  return (
-                    <div
-                      key={query._id}
-                      className={cn(
-                        "animate-in rounded-lg border border-border border-l-2 bg-card p-4 transition-colors fade-in duration-150",
-                        answered ? "border-l-border opacity-80" : "border-l-primary"
-                      )}
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p
-                          className={cn(
-                            "font-medium",
-                            answered ? "text-muted-foreground" : "text-foreground"
-                          )}
-                        >
-                          {query.subject}
-                        </p>
-                        <StatusBadge variant="neutral" className="capitalize">
-                          {query.role}
-                        </StatusBadge>
-                        <StatusBadge
-                          variant={answered ? "success" : "warning"}
-                          className="capitalize"
-                        >
-                          {query.status}
-                        </StatusBadge>
                       </div>
-
-                      <p className="mt-1 text-sm text-muted-foreground">{query.message}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {query.name}
-                        {query.createdAt
-                          ? ` · ${new Date(query.createdAt).toLocaleString()}`
-                          : ""}
-                      </p>
-
-                      {answered ? (
-                        <div className="mt-3 rounded-md border border-border bg-muted/40 p-3">
-                          <p className="mb-1 text-xs font-medium text-muted-foreground">
-                            Your reply
-                          </p>
-                          <p className="text-sm text-foreground">{query.reply}</p>
-                        </div>
-                      ) : (
-                        <div className="mt-3 space-y-2">
-                          <Label htmlFor={`reply-${query._id}`}>Reply</Label>
-                          <Textarea
-                            id={`reply-${query._id}`}
-                            value={replyDrafts[query._id] || ""}
-                            onChange={(event) =>
-                              setReplyDrafts((prev) => ({
-                                ...prev,
-                                [query._id]: event.target.value,
-                              }))
-                            }
-                            placeholder="Write your answer to this query..."
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleReply(query._id)}
-                            disabled={
-                              replyingId === query._id ||
-                              !(replyDrafts[query._id] || "").trim()
-                            }
-                          >
-                            <Send className="size-4" />
-                            {replyingId === query._id ? "Sending..." : "Send reply"}
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
               </div>
             )}
+          </SectionCard>
+
+          {/* ---- Counts, then the compose form: one job per cell ---- */}
+          <div className="flex flex-col gap-5 xl:col-span-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <StatCard
+                label="Notifications"
+                value={feedError ? "—" : notifications.length}
+                icon={Bell}
+                loading={loading}
+              />
+              <StatCard
+                label="Unread"
+                value={feedError ? "—" : unreadCount}
+                icon={Inbox}
+                tone={unreadCount > 0 ? "warning" : "success"}
+                loading={loading}
+              />
+            </div>
+
+            <SectionCard
+              title="Compose"
+              description="Broadcast to every portal that is an audience for it."
+              icon={Plus}
+              className="animate-in fade-in duration-200"
+            >
+              {showForm ? (
+                <form onSubmit={handleSubmitNotification} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="notification-type">Type</Label>
+                      <Select
+                        value={formData.type}
+                        onValueChange={(value) => setFormData({ ...formData, type: value })}
+                      >
+                        <SelectTrigger id="notification-type" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="info">Info</SelectItem>
+                          <SelectItem value="success">Success</SelectItem>
+                          <SelectItem value="warning">Warning</SelectItem>
+                          <SelectItem value="error">Error</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="notification-priority">Priority</Label>
+                      <Select
+                        value={formData.priority}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, priority: value })
+                        }
+                      >
+                        <SelectTrigger id="notification-priority" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="notification-title">Title</Label>
+                    <Input
+                      id="notification-title"
+                      value={formData.title}
+                      onChange={(event) =>
+                        setFormData({ ...formData, title: event.target.value })
+                      }
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="notification-message">Message</Label>
+                    <Textarea
+                      id="notification-message"
+                      value={formData.message}
+                      onChange={(event) =>
+                        setFormData({ ...formData, message: event.target.value })
+                      }
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 border-t pt-4">
+                    <Button type="submit" disabled={formLoading}>
+                      {formLoading ? "Sending..." : "Send notification"}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    A broadcast reaches the portals its audience covers and lands in this
+                    feed straight away.
+                  </p>
+                  <Button className="w-full" onClick={() => setShowForm(true)}>
+                    <Plus className="size-4" />
+                    New notification
+                  </Button>
+                </div>
+              )}
+            </SectionCard>
           </div>
-        </SectionCard>
+        </div>
+
+        {/* ============ Band 2 — the query inbox ============ */}
+        {/* Queries raised by faculty and students. Answering one is the only
+            way a query leaves status "open". The reply notification goes to
+            the author alone (recipientUserId, no role audience), so no other
+            faculty member or student ever reads the subject or the answer. */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          <SectionCard
+            title="Query inbox"
+            description={
+              queriesLoading
+                ? "Loading queries…"
+                : `${queries.length} total · ${openQueryCount} awaiting a reply`
+            }
+            icon={MessageSquare}
+            className="animate-in fade-in duration-200 xl:col-span-8"
+          >
+            <div className="space-y-4">
+              {queriesError && (
+                <Callout tone="destructive" title="Something went wrong">
+                  {queriesError}
+                </Callout>
+              )}
+
+              {queriesLoading ? (
+                <div className="space-y-3">
+                  {[...Array(2)].map((_, index) => (
+                    <Skeleton key={index} className="h-24 w-full rounded-lg" />
+                  ))}
+                </div>
+              ) : queries.length === 0 ? (
+                <EmptyState
+                  icon={MessageSquare}
+                  title="No queries raised"
+                  description="Faculty and students can raise a query from their portal."
+                />
+              ) : (
+                <div className="space-y-4">
+                  {queries.map((query) => {
+                    const answered = query.status === "answered";
+                    return (
+                      <div
+                        key={query._id}
+                        className={cn(
+                          "animate-in rounded-lg border border-border p-4 transition-colors fade-in duration-200",
+                          answered ? "bg-muted/40" : "bg-card"
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={cn(
+                              "flex size-9 shrink-0 items-center justify-center rounded-lg",
+                              answered
+                                ? "bg-success/10 text-success"
+                                : "bg-warning/10 text-warning"
+                            )}
+                          >
+                            {answered ? (
+                              <CheckCircle2 className="size-4" />
+                            ) : (
+                              <MessageSquare className="size-4" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p
+                                className={cn(
+                                  "font-medium",
+                                  answered ? "text-muted-foreground" : "text-foreground"
+                                )}
+                              >
+                                {query.subject}
+                              </p>
+                              <StatusBadge variant="neutral" className="capitalize">
+                                {query.role}
+                              </StatusBadge>
+                              <StatusBadge
+                                variant={answered ? "success" : "warning"}
+                                className="capitalize"
+                              >
+                                {query.status}
+                              </StatusBadge>
+                            </div>
+
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {query.message}
+                            </p>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              {[query.name, formatDateTime(query.createdAt)]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          </div>
+                        </div>
+
+                        {answered ? (
+                          <div className="mt-3 rounded-md border border-border bg-background p-3">
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">
+                              Your reply
+                            </p>
+                            <p className="text-sm text-foreground">{query.reply}</p>
+                          </div>
+                        ) : (
+                          <div className="mt-4 space-y-2 border-t pt-4">
+                            <Label htmlFor={`reply-${query._id}`}>Reply</Label>
+                            <Textarea
+                              id={`reply-${query._id}`}
+                              value={replyDrafts[query._id] || ""}
+                              onChange={(event) =>
+                                setReplyDrafts((prev) => ({
+                                  ...prev,
+                                  [query._id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Write your answer to this query..."
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleReply(query._id)}
+                              disabled={
+                                replyingId === query._id ||
+                                !(replyDrafts[query._id] || "").trim()
+                              }
+                            >
+                              <Send className="size-4" />
+                              {replyingId === query._id ? "Sending..." : "Send reply"}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          {/* ---- Reply status + the delivery guarantee ---- */}
+          <div className="flex flex-col gap-5 xl:col-span-4">
+            <StatCard
+              label="Queries awaiting a reply"
+              value={queriesError ? "—" : openQueryCount}
+              icon={MessageSquare}
+              tone={openQueryCount > 0 ? "warning" : "success"}
+              loading={queriesLoading}
+            />
+
+            <SectionCard
+              title="Reply status"
+              icon={CheckCircle2}
+              className="animate-in fade-in duration-200"
+            >
+              {queriesError ? (
+                <p className="text-sm text-muted-foreground">
+                  Counts are unavailable while queries cannot be loaded.
+                </p>
+              ) : queriesLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-9 w-24" />
+                  <Skeleton className="h-5 w-32" />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <BigFigure
+                    value={openQueryCount}
+                    unit="open"
+                    tone={openQueryCount > 0 ? "warning" : "default"}
+                  />
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {answeredQueryCount} answered
+                  </p>
+                </div>
+              )}
+            </SectionCard>
+
+            <SectionCard
+              title="Who sees a reply"
+              icon={Lock}
+              className="animate-in fade-in duration-200"
+            >
+              <p className="text-sm text-muted-foreground">
+                A reply is addressed to the author alone. No other faculty member or
+                student can read the query or your answer.
+              </p>
+            </SectionCard>
+          </div>
+        </div>
       </div>
 
       <ConfirmDialog

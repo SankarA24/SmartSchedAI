@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  Activity,
   BookOpen,
   Building2,
   CalendarCheck,
@@ -27,6 +28,7 @@ import { navForRole } from "@/lib/nav";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { SectionCard } from "@/components/common/SectionCard";
 import { Callout } from "@/components/common/Callout";
+import { EmptyState } from "@/components/common/EmptyState";
 import { StatCard } from "@/components/common/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataValidationPanel } from "@/components/timetable/DataValidationPanel";
@@ -942,6 +944,58 @@ export default function GenerateTimetable() {
         }
       : null;
 
+  // Readiness, summarised for the launch card. Severity follows the colour
+  // system: blocking issues are errors (destructive), minor ones are
+  // warnings, a clean target is success.
+  const readiness = !targetComplete
+    ? { variant: "neutral", label: "No group selected" }
+    : checks.blocking > 0
+      ? {
+          variant: "destructive",
+          label: `${checks.blocking} blocking issue${checks.blocking === 1 ? "" : "s"}`,
+        }
+      : checks.minor > 0
+        ? {
+            variant: "warning",
+            label: `${checks.minor} minor issue${checks.minor === 1 ? "" : "s"}`,
+          }
+        : { variant: "success", label: "Ready to generate" };
+
+  // A source that failed to load renders an em dash — an empty collection and
+  // an unreachable one must not look the same.
+  const scopeRows = [
+    {
+      id: "courses",
+      label: "Courses",
+      value: dataError?.courses ? "—" : scoped.courses.length,
+    },
+    {
+      id: "sessions",
+      label: "Weekly sessions",
+      value: dataError?.courses ? "—" : checks.requiredSessions,
+    },
+    {
+      id: "faculty",
+      label: "Faculty",
+      value: dataError?.faculty ? "—" : scoped.faculty.length,
+    },
+    {
+      id: "rooms",
+      label: "Rooms",
+      value: dataError?.rooms ? "—" : rooms.length,
+    },
+    {
+      id: "students",
+      label: "Students",
+      value: studentsError ? "—" : checks.cohortSize,
+    },
+    {
+      id: "capacity",
+      label: "Slots in the week",
+      value: checks.weeklyCapacity,
+    },
+  ];
+
   return (
     <AppShell
       brand={shell.brand}
@@ -954,370 +1008,115 @@ export default function GenerateTimetable() {
         description="Check the data, pick an engine, then run a generation for one student group."
         actions={
           <Button variant="outline" size="sm" onClick={refreshAll} disabled={dataLoading}>
-            <RefreshCw className={dataLoading ? "animate-spin" : undefined} />
+            <RefreshCw className={dataLoading ? "size-4 animate-spin" : "size-4"} />
             Refresh data
           </Button>
         }
       />
 
-      <div className="flex flex-col gap-6">
-        {/* ============================================
-            1. DATA VALIDATION STATUS
-        ============================================ */}
-
-        <div className="flex flex-col gap-3">
-          <DataValidationPanel
-            entities={checks.entities}
-            onRefresh={refreshAll}
-            loading={dataLoading}
-          />
-
-          {!targetComplete ? (
-            <Callout tone="info" title="Pick a target group" icon={CalendarCheck}>
-              The checks above run against the selected department, year, semester and
-              academic year.
-            </Callout>
-          ) : checks.blocking > 0 ? (
-            <Callout
-              tone="warning"
-              title={`${checks.blocking} blocking issue${checks.blocking === 1 ? "" : "s"}`}
-              icon={TriangleAlert}
-            >
-              Generation will fail on these. Fix the data, then refresh.
-            </Callout>
-          ) : checks.minor > 0 ? (
-            <Callout
-              tone="warning"
-              title={`${checks.minor} minor issue${checks.minor === 1 ? "" : "s"} — generation may fall back`}
-              icon={TriangleAlert}
-            >
-              Nothing here stops a run, but the genetic algorithm may not reach a
-              conflict-free schedule and hand over to the constraint solver.
-            </Callout>
-          ) : (
-            <Callout tone="success" title="Ready to generate" icon={CheckCircle2}>
-              Every course has eligible faculty and a room of the right type, and the grid
-              has room for {checks.requiredSessions} of {checks.weeklyCapacity} weekly
-              slots.
-            </Callout>
-          )}
-
-          {dataError && (
-            <Callout tone="destructive" title="Some data could not be loaded" icon={TriangleAlert}>
-              {Object.entries(dataError)
-                .filter(([, message]) => Boolean(message))
-                .map(([source, message]) => `${source}: ${message}`)
-                .join(" · ")}
-            </Callout>
-          )}
-
-          {studentsError && (
-            <Callout tone="warning" title="Students could not be loaded" icon={TriangleAlert}>
-              {studentsError} — class size is unknown, so room capacity is not checked.
-            </Callout>
-          )}
-        </div>
-
-        {/* ============================================
-            2. ALGORITHM SELECTION
-        ============================================ */}
-
-        <SectionCard
-          title="Generation engine"
-          description="Four engines exist in this codebase. Whichever you pick, every result is validated against the same hard rules before it is saved."
-          icon={Dna}
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            {ENGINES.map((item) => (
-              <AlgorithmCard
-                key={item.id}
-                id={item.id}
-                name={item.name}
-                description={item.description}
-                icon={item.icon}
-                advantages={item.advantages}
-                considerations={item.considerations}
-                recommended={item.recommended}
-                selected={engineId === item.id}
-                onSelect={setEngineId}
-                disabled={item.id === "ai" && aiDisabled}
-                disabledReason={
-                  item.id === "ai" && aiDisabled
-                    ? "The server reports no Gemini API key, so an AI run would only fall back to the genetic algorithm."
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        </SectionCard>
-
-        {/* ============================================
-            3. ADVANCED SETTINGS
-        ============================================ */}
-
-        <SectionCard
-          title="Advanced settings"
-          description="Genetic algorithm tunables, plus the optimisation-goal flags stored in system configuration."
-          icon={SlidersHorizontal}
-          actions={
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAdvancedOpen((open) => !open)}
-              aria-expanded={advancedOpen}
-            >
-              {advancedOpen ? <ChevronUp /> : <ChevronDown />}
-              {advancedOpen ? "Hide" : "Show"}
-            </Button>
-          }
-        >
-          {advancedOpen && (
-            <div className="flex animate-in flex-col gap-6 fade-in duration-150">
-              <div className="flex flex-col gap-3">
-                <h3 className="text-sm font-medium text-foreground">
-                  Genetic algorithm
-                </h3>
-                {!usesGa && (
+      <div className="space-y-5">
+        {/* ============ Band 1 — launch (small) | run (large) ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {/* ---- Launch ---- */}
+          <SectionCard
+            title="Run a generation"
+            description="Courses are scoped by all four fields, faculty by department — exactly how the generator loads its data. One draft timetable is created; nothing is published."
+            icon={Play}
+            className="xl:col-span-5"
+            actions={<StatusBadge variant={readiness.variant}>{readiness.label}</StatusBadge>}
+            footer={
+              <div className="flex w-full flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="lg"
+                    onClick={startGeneration}
+                    disabled={!targetComplete || submitting || running}
+                  >
+                    <Play className="size-4" />
+                    {submitting
+                      ? "Starting…"
+                      : running
+                        ? "Generation running…"
+                        : "Generate timetable"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAdvancedOpen((open) => !open)}
+                    aria-expanded={advancedOpen}
+                  >
+                    {advancedOpen ? (
+                      <ChevronUp className="size-4" />
+                    ) : (
+                      <ChevronDown className="size-4" />
+                    )}
+                    Advanced settings
+                  </Button>
+                </div>
+                {!targetComplete && (
                   <p className="text-xs text-muted-foreground">
-                    The backtracking solver takes no genetic parameters, so these are
-                    disabled while it is selected.
+                    Select a department, year, semester and academic year first.
                   </p>
                 )}
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="ga-seed">Seed</Label>
-                    <Input
-                      id="ga-seed"
-                      type="number"
-                      inputMode="numeric"
-                      placeholder="random"
-                      disabled={!usesGa}
-                      value={gaOptions.seed}
-                      onChange={(event) =>
-                        setGaOptions((current) => ({ ...current, seed: event.target.value }))
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Same seed and same data reproduce the same timetable.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="ga-population">Population size</Label>
-                    <Input
-                      id="ga-population"
-                      type="number"
-                      inputMode="numeric"
-                      min={GA_LIMITS.populationSize.min}
-                      max={GA_LIMITS.populationSize.max}
-                      placeholder="60"
-                      disabled={!usesGa}
-                      value={gaOptions.populationSize}
-                      onChange={(event) =>
-                        setGaOptions((current) => ({
-                          ...current,
-                          populationSize: event.target.value,
-                        }))
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Clamped server-side to {GA_LIMITS.populationSize.min}–
-                      {GA_LIMITS.populationSize.max}.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="ga-generations">Max generations</Label>
-                    <Input
-                      id="ga-generations"
-                      type="number"
-                      inputMode="numeric"
-                      min={GA_LIMITS.maxGenerations.min}
-                      max={GA_LIMITS.maxGenerations.max}
-                      placeholder="300"
-                      disabled={!usesGa}
-                      value={gaOptions.maxGenerations}
-                      onChange={(event) =>
-                        setGaOptions((current) => ({
-                          ...current,
-                          maxGenerations: event.target.value,
-                        }))
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Clamped server-side to {GA_LIMITS.maxGenerations.min}–
-                      {GA_LIMITS.maxGenerations.max}.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-background px-3 py-2.5">
+                {targetComplete && checks.blocking > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    Fixed server-side — the generate route drops these from the request
-                    body, so they are shown rather than offered:
+                    {checks.blocking} blocking issue(s) below will very likely fail this run.
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {GA_FIXED_SETTINGS.map((setting) => (
-                      <StatusBadge key={setting.id} variant="neutral">
-                        {setting.label}: {setting.value}
-                      </StatusBadge>
-                    ))}
+                )}
+              </div>
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {TARGET_FIELDS.map((field) => (
+                  <div key={field.id} className="flex min-w-0 flex-col gap-1.5">
+                    <Label htmlFor={`target-${field.id}`}>{field.label}</Label>
+                    <Select
+                      value={target[field.id] ?? ""}
+                      onValueChange={(value) =>
+                        setTarget((current) => ({ ...current, [field.id]: value }))
+                      }
+                    >
+                      <SelectTrigger id={`target-${field.id}`} className="w-full">
+                        <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {options[field.id].map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                </div>
+                ))}
               </div>
 
-              <div className="flex flex-col gap-3 border-t border-border pt-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-medium text-foreground">Optimisation goals</h3>
-                  <Link
-                    to="/infrastructure"
-                    className="text-xs text-primary underline-offset-4 hover:underline"
-                  >
-                    Infrastructure &amp; policy
-                  </Link>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  These are system configuration, not per-run options: saving them writes to
-                  the shared configuration, for every department.
+              {!dataLoading && options.department.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  There are no courses yet, so there is nothing to generate for.{" "}
+                  <Link to="/courses" className="text-primary underline-offset-4 hover:underline">
+                    Add courses
+                  </Link>{" "}
+                  first.
                 </p>
+              )}
 
-                <Callout tone="warning" title="Recorded, not yet enforced" icon={TriangleAlert}>
-                  These four flags are stored in the system configuration and returned by{" "}
-                  <code>GET /api/config/grid</code>, but no scheduler reads them today.
-                  Changing them will not change the timetable the generator produces.
-                </Callout>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {OPTIMIZATION_FLAGS.map((flag) => (
-                    <div key={flag.id} className="flex items-start gap-2.5">
-                      <Checkbox
-                        id={`flag-${flag.id}`}
-                        className="mt-0.5"
-                        checked={Boolean(flagDraft[flag.id])}
-                        onCheckedChange={(checked) =>
-                          setFlagDraft((current) => ({ ...current, [flag.id]: checked === true }))
-                        }
-                      />
-                      <div className="flex flex-col gap-0.5">
-                        <Label htmlFor={`flag-${flag.id}`} className="font-medium">
-                          {flag.label}
-                        </Label>
-                        <span className="text-xs text-muted-foreground">{flag.hint}</span>
-                        <span className="text-xs text-warning">{flag.enforcement}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={saveFlags}
-                    disabled={!flagsDirty || flagSaving}
-                  >
-                    {flagSaving ? "Saving…" : "Save to system config"}
-                  </Button>
-                  {flagsDirty && !flagSaving && (
-                    <span className="text-xs text-muted-foreground">Unsaved changes</span>
-                  )}
-                  {flagError && (
-                    <span className="text-xs text-destructive">{flagError}</span>
-                  )}
-                </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>Engine</span>
+                <StatusBadge variant="info">{engine.name}</StatusBadge>
               </div>
-            </div>
-          )}
-        </SectionCard>
 
-        {/* ============================================
-            4. READY TO GENERATE
-        ============================================ */}
-
-        <SectionCard
-          title="Ready to generate"
-          description="Courses are scoped by all four fields, faculty by department — exactly how the generator loads its data. One draft timetable is created; nothing is published."
-          icon={Play}
-        >
-          <div className="flex flex-col gap-5">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {TARGET_FIELDS.map((field) => (
-                <div key={field.id} className="flex flex-col gap-1.5">
-                  <Label htmlFor={`target-${field.id}`}>{field.label}</Label>
-                  <Select
-                    value={target[field.id] ?? ""}
-                    onValueChange={(value) =>
-                      setTarget((current) => ({ ...current, [field.id]: value }))
-                    }
-                  >
-                    <SelectTrigger id={`target-${field.id}`} className="w-full">
-                      <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {options[field.id].map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-
-            {!dataLoading && options.department.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                There are no courses yet, so there is nothing to generate for.{" "}
-                <Link to="/courses" className="text-primary underline-offset-4 hover:underline">
-                  Add courses
-                </Link>{" "}
-                first.
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-              <StatusBadge variant="info">{engine.name}</StatusBadge>
-              <span>
-                {scoped.courses.length} course(s) · {checks.requiredSessions} weekly
-                session(s) · {scoped.faculty.length} faculty · {rooms.length} rooms
-              </span>
-            </div>
-
-            {submitError && (
-              <Callout tone="destructive" title="Generation was not started" icon={TriangleAlert}>
-                {submitError}
-              </Callout>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                onClick={startGeneration}
-                disabled={!targetComplete || submitting || running}
-              >
-                <Play />
-                {submitting ? "Starting…" : running ? "Generation running…" : "Generate timetable"}
-              </Button>
-              {!targetComplete && (
-                <span className="text-sm text-muted-foreground">
-                  Select a department, year, semester and academic year first.
-                </span>
-              )}
-              {targetComplete && checks.blocking > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  {checks.blocking} blocking issue(s) above will very likely fail this run.
-                </span>
+              {submitError && (
+                <Callout tone="destructive" title="Generation was not started" icon={TriangleAlert}>
+                  {submitError}
+                </Callout>
               )}
             </div>
-          </div>
-        </SectionCard>
+          </SectionCard>
 
-        {/* ============================================
-            5. PROGRESS
-        ============================================ */}
-
-        {(jobId || localRun) && (
-          <div className="flex flex-col gap-3">
+          {/* ---- Run: live progress, then the finished timetable ---- */}
+          <div className="flex min-w-0 flex-col gap-5 xl:col-span-7">
             {jobId ? (
               <>
                 <GenerationProgress
@@ -1343,18 +1142,20 @@ export default function GenerateTimetable() {
                   </p>
                 )}
 
-                {liveRunStats && (
-                  <GARunSummary stats={liveRunStats} live={!progress.terminal} />
-                )}
+                {liveRunStats && <GARunSummary stats={liveRunStats} live={!progress.terminal} />}
               </>
-            ) : (
-              <SectionCard title="Generation progress" icon={GitBranch}>
-                {localRun?.status === "running" ? (
+            ) : localRun ? (
+              <SectionCard
+                title="Generation progress"
+                description="Backtracking solver"
+                icon={GitBranch}
+              >
+                {localRun.status === "running" ? (
                   <p className="text-sm text-muted-foreground">
                     Running the backtracking solver. This endpoint is synchronous and
                     reports no intermediate steps — the finished timetable appears below.
                   </p>
-                ) : localRun?.status === "failed" ? (
+                ) : localRun.status === "failed" ? (
                   <Callout tone="destructive" title="Generation failed" icon={TriangleAlert}>
                     {localRun.error}
                   </Callout>
@@ -1364,126 +1165,424 @@ export default function GenerateTimetable() {
                   </p>
                 )}
               </SectionCard>
+            ) : (
+              <SectionCard
+                title="Generation run"
+                description="Live progress and the finished timetable appear here."
+                icon={Activity}
+              >
+                <EmptyState
+                  icon={Play}
+                  title="No run yet"
+                  description="Pick a target group and an engine, then start a generation. Steps, genetic-algorithm telemetry and the saved draft all land in this panel."
+                />
+              </SectionCard>
+            )}
+
+            {result && (
+              <SectionCard
+                title="Timetable generated"
+                description={result.name || undefined}
+                icon={CheckCircle2}
+                actions={<StatusBadge variant="success">draft saved</StatusBadge>}
+                footer={
+                  <div className="flex w-full flex-wrap gap-3">
+                    <Button
+                      onClick={() => resultId && navigate(`/view-timetable/${resultId}`)}
+                      disabled={!resultId}
+                    >
+                      <Eye className="size-4" />
+                      View timetable
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => download("csv")}
+                      disabled={!resultId || downloading !== null}
+                    >
+                      <Download className="size-4" />
+                      {downloading === "csv" ? "Preparing…" : "Download CSV"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => download("json")}
+                      disabled={!resultId || downloading !== null}
+                    >
+                      <Download className="size-4" />
+                      {downloading === "json" ? "Preparing…" : "Download JSON"}
+                    </Button>
+                    <Button variant="ghost" onClick={resetRun}>
+                      <RefreshCw className="size-4" />
+                      Regenerate
+                    </Button>
+                  </div>
+                }
+              >
+                <div className="flex flex-col gap-5">
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <StatCard
+                      label="Classes scheduled"
+                      value={result.schedule?.length ?? resultMetadata?.totalHours ?? 0}
+                      icon={CalendarCheck}
+                    />
+                    <StatCard
+                      label="Quality score"
+                      value={
+                        typeof resultMetadata?.qualityScore === "number"
+                          ? resultMetadata.qualityScore
+                          : "—"
+                      }
+                      icon={Sparkles}
+                      tone="success"
+                    />
+                    <StatCard
+                      label="Conflicts"
+                      value={resultMetadata?.conflictCount ?? 0}
+                      icon={TriangleAlert}
+                      tone={resultMetadata?.conflictCount ? "warning" : "default"}
+                    />
+                  </div>
+
+                  {typeof resultMetadata?.qualityScore === "number" && (
+                    <QualityScore
+                      score={resultMetadata.qualityScore}
+                      breakdown={resultMetadata.qualityBreakdown}
+                      size="lg"
+                    />
+                  )}
+
+                  {ranWith === "genetic" && finishedBySolver(actualMethod) && (
+                    <Callout
+                      tone="warning"
+                      title="Finished by the constraint solver"
+                      icon={TriangleAlert}
+                    >
+                      The genetic algorithm could not reach a conflict-free schedule, so the
+                      backtracking solver finished the run. The timetable is valid but not
+                      optimised.
+                    </Callout>
+                  )}
+
+                  {ranWith === "ai" && actualMethod && actualMethod !== "ai" && (
+                    <Callout tone="info" title="AI was not used" icon={Sparkles}>
+                      Gemini was unavailable or returned an invalid schedule, so this
+                      timetable came from the{" "}
+                      {METHOD_LABELS[actualMethod] || "fallback scheduler"}.
+                    </Callout>
+                  )}
+
+                  <GARunSummary metadata={resultMetadata} />
+
+                  {downloadError && (
+                    <Callout tone="destructive" title="Export failed" icon={TriangleAlert}>
+                      {downloadError}
+                    </Callout>
+                  )}
+                </div>
+              </SectionCard>
+            )}
+
+            {resultError && (
+              <Callout
+                tone="warning"
+                title="Timetable saved, but could not be read back"
+                icon={TriangleAlert}
+              >
+                {resultError}
+                {timetableId && (
+                  <>
+                    {" "}
+                    <Link
+                      to={`/view-timetable/${timetableId}`}
+                      className="text-primary underline-offset-4 hover:underline"
+                    >
+                      Open it directly
+                    </Link>
+                    .
+                  </>
+                )}
+              </Callout>
             )}
           </div>
-        )}
+        </div>
 
-        {/* ============================================
-            6. COMPLETE
-        ============================================ */}
+        {/* ============ Band 2 — readiness (large) | scope (small) ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          <div className="min-w-0 xl:col-span-7">
+            <DataValidationPanel
+              entities={checks.entities}
+              onRefresh={refreshAll}
+              loading={dataLoading}
+            />
+          </div>
 
-        {result && (
-          <SectionCard
-            title="Timetable generated"
-            description={result.name || undefined}
-            icon={CheckCircle2}
-            actions={<StatusBadge variant="success">draft saved</StatusBadge>}
-          >
-            <div className="flex flex-col gap-5">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <StatCard
-                  label="Classes scheduled"
-                  value={result.schedule?.length ?? resultMetadata?.totalHours ?? 0}
-                  icon={CalendarCheck}
-                />
-                <StatCard
-                  label="Quality score"
-                  value={
-                    typeof resultMetadata?.qualityScore === "number"
-                      ? resultMetadata.qualityScore
-                      : "—"
-                  }
-                  icon={Sparkles}
-                  tone="success"
-                />
-                <StatCard
-                  label="Conflicts"
-                  value={resultMetadata?.conflictCount ?? 0}
-                  icon={TriangleAlert}
-                  tone={resultMetadata?.conflictCount ? "warning" : "default"}
-                />
-              </div>
+          <div className="flex min-w-0 flex-col gap-5 xl:col-span-5">
+            <SectionCard
+              title="Selected group"
+              description={
+                targetComplete
+                  ? `${target.department} · Year ${target.year} · Semester ${target.semester} · ${target.academicYear}`
+                  : "Pick a department, year, semester and academic year to scope these figures."
+              }
+              icon={GraduationCap}
+            >
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+                {scopeRows.map((row) => (
+                  <div key={row.id} className="flex min-w-0 flex-col gap-0.5">
+                    <dt className="truncate text-xs text-muted-foreground">{row.label}</dt>
+                    <dd className="text-lg font-semibold tracking-tight text-foreground tabular-nums">
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </SectionCard>
 
-              {typeof resultMetadata?.qualityScore === "number" && (
-                <QualityScore
-                  score={resultMetadata.qualityScore}
-                  breakdown={resultMetadata.qualityBreakdown}
-                  size="lg"
-                />
-              )}
-
-              {ranWith === "genetic" && finishedBySolver(actualMethod) && (
-                <Callout tone="warning" title="Finished by the constraint solver" icon={TriangleAlert}>
-                  The genetic algorithm could not reach a conflict-free schedule, so the
-                  backtracking solver finished the run. The timetable is valid but not
-                  optimised.
-                </Callout>
-              )}
-
-              {ranWith === "ai" && actualMethod && actualMethod !== "ai" && (
-                <Callout tone="info" title="AI was not used" icon={Sparkles}>
-                  Gemini was unavailable or returned an invalid schedule, so this timetable
-                  came from the {METHOD_LABELS[actualMethod] || "fallback scheduler"}.
-                </Callout>
-              )}
-
-              <GARunSummary metadata={resultMetadata} />
-
-              {downloadError && (
-                <Callout tone="destructive" title="Export failed" icon={TriangleAlert}>
-                  {downloadError}
-                </Callout>
-              )}
-
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  onClick={() => resultId && navigate(`/view-timetable/${resultId}`)}
-                  disabled={!resultId}
-                >
-                  <Eye />
-                  View timetable
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => download("csv")}
-                  disabled={!resultId || downloading !== null}
-                >
-                  <Download />
-                  {downloading === "csv" ? "Preparing…" : "Download CSV"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => download("json")}
-                  disabled={!resultId || downloading !== null}
-                >
-                  <Download />
-                  {downloading === "json" ? "Preparing…" : "Download JSON"}
-                </Button>
-                <Button variant="ghost" onClick={resetRun}>
-                  <RefreshCw />
-                  Regenerate
-                </Button>
-              </div>
-            </div>
-          </SectionCard>
-        )}
-
-        {resultError && (
-          <Callout tone="warning" title="Timetable saved, but could not be read back" icon={TriangleAlert}>
-            {resultError}
-            {timetableId && (
-              <>
-                {" "}
-                <Link
-                  to={`/view-timetable/${timetableId}`}
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  Open it directly
-                </Link>
-                .
-              </>
+            {!targetComplete ? (
+              <Callout tone="info" title="Pick a target group" icon={CalendarCheck}>
+                The checks beside this run against the selected department, year, semester
+                and academic year.
+              </Callout>
+            ) : checks.blocking > 0 ? (
+              <Callout
+                tone="destructive"
+                title={`${checks.blocking} blocking issue${checks.blocking === 1 ? "" : "s"}`}
+                icon={TriangleAlert}
+              >
+                Generation will fail on these. Fix the data, then refresh.
+              </Callout>
+            ) : checks.minor > 0 ? (
+              <Callout
+                tone="warning"
+                title={`${checks.minor} minor issue${checks.minor === 1 ? "" : "s"} — generation may fall back`}
+                icon={TriangleAlert}
+              >
+                Nothing here stops a run, but the genetic algorithm may not reach a
+                conflict-free schedule and hand over to the constraint solver.
+              </Callout>
+            ) : (
+              <Callout tone="success" title="Ready to generate" icon={CheckCircle2}>
+                Every course has eligible faculty and a room of the right type, and the grid
+                has room for {checks.requiredSessions} of {checks.weeklyCapacity} weekly
+                slots.
+              </Callout>
             )}
-          </Callout>
+
+            {dataError && (
+              <Callout
+                tone="destructive"
+                title="Some data could not be loaded"
+                icon={TriangleAlert}
+              >
+                {Object.entries(dataError)
+                  .filter(([, message]) => Boolean(message))
+                  .map(([source, message]) => `${source}: ${message}`)
+                  .join(" · ")}
+              </Callout>
+            )}
+
+            {studentsError && (
+              <Callout tone="warning" title="Students could not be loaded" icon={TriangleAlert}>
+                {studentsError} — class size is unknown, so room capacity is not checked.
+              </Callout>
+            )}
+          </div>
+        </div>
+
+        {/* ============ Band 3 — engine picker ============ */}
+        <SectionCard
+          title="Generation engine"
+          description="Four engines exist in this codebase. Whichever you pick, every result is validated against the same hard rules before it is saved."
+          icon={Dna}
+        >
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {ENGINES.map((item) => (
+              <AlgorithmCard
+                key={item.id}
+                id={item.id}
+                name={item.name}
+                description={item.description}
+                icon={item.icon}
+                advantages={item.advantages}
+                considerations={item.considerations}
+                recommended={item.recommended}
+                selected={engineId === item.id}
+                onSelect={setEngineId}
+                disabled={item.id === "ai" && aiDisabled}
+                disabledReason={
+                  item.id === "ai" && aiDisabled
+                    ? "The server reports no Gemini API key, so an AI run would only fall back to the genetic algorithm."
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </SectionCard>
+
+        {/* ============ Band 4 — advanced (opened from the launch card) ============ */}
+        {advancedOpen && (
+          <div className="grid animate-in gap-5 fade-in duration-200 xl:grid-cols-12">
+            <SectionCard
+              title="Genetic algorithm"
+              description="Per-run tunables. The backtracking solver takes none of them."
+              icon={SlidersHorizontal}
+              className="xl:col-span-7"
+            >
+              <div className="flex flex-col gap-4">
+                {!usesGa && (
+                  <p className="text-xs text-muted-foreground">
+                    The backtracking solver takes no genetic parameters, so these are
+                    disabled while it is selected.
+                  </p>
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <Label htmlFor="ga-seed">Seed</Label>
+                    <Input
+                      id="ga-seed"
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="random"
+                      disabled={!usesGa}
+                      value={gaOptions.seed}
+                      onChange={(event) =>
+                        setGaOptions((current) => ({ ...current, seed: event.target.value }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Same seed and same data reproduce the same timetable.
+                    </p>
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <Label htmlFor="ga-population">Population size</Label>
+                    <Input
+                      id="ga-population"
+                      type="number"
+                      inputMode="numeric"
+                      min={GA_LIMITS.populationSize.min}
+                      max={GA_LIMITS.populationSize.max}
+                      placeholder="60"
+                      disabled={!usesGa}
+                      value={gaOptions.populationSize}
+                      onChange={(event) =>
+                        setGaOptions((current) => ({
+                          ...current,
+                          populationSize: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Clamped server-side to {GA_LIMITS.populationSize.min}–
+                      {GA_LIMITS.populationSize.max}.
+                    </p>
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <Label htmlFor="ga-generations">Max generations</Label>
+                    <Input
+                      id="ga-generations"
+                      type="number"
+                      inputMode="numeric"
+                      min={GA_LIMITS.maxGenerations.min}
+                      max={GA_LIMITS.maxGenerations.max}
+                      placeholder="300"
+                      disabled={!usesGa}
+                      value={gaOptions.maxGenerations}
+                      onChange={(event) =>
+                        setGaOptions((current) => ({
+                          ...current,
+                          maxGenerations: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Clamped server-side to {GA_LIMITS.maxGenerations.min}–
+                      {GA_LIMITS.maxGenerations.max}.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                  <p className="text-xs text-muted-foreground">
+                    Fixed server-side — the generate route drops these from the request
+                    body, so they are shown rather than offered:
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {GA_FIXED_SETTINGS.map((setting) => (
+                      <StatusBadge key={setting.id} variant="neutral">
+                        {setting.label}: {setting.value}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            <SectionCard
+              title="Optimisation goals"
+              description="System configuration, not per-run options: saving writes to the shared configuration, for every department."
+              icon={Settings2}
+              className="xl:col-span-5"
+              actions={
+                <Link
+                  to="/infrastructure"
+                  className="text-xs text-primary underline-offset-4 hover:underline"
+                >
+                  Infrastructure &amp; policy
+                </Link>
+              }
+              footer={
+                <div className="flex w-full flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={saveFlags}
+                    disabled={!flagsDirty || flagSaving}
+                  >
+                    {flagSaving ? "Saving…" : "Save to system config"}
+                  </Button>
+                  {flagsDirty && !flagSaving && (
+                    <span className="text-xs text-muted-foreground">Unsaved changes</span>
+                  )}
+                  {flagError && <span className="text-xs text-destructive">{flagError}</span>}
+                </div>
+              }
+            >
+              <div className="flex flex-col gap-4">
+                <Callout tone="warning" title="Recorded, not yet enforced" icon={TriangleAlert}>
+                  These four flags are stored in the system configuration and returned by{" "}
+                  <code>GET /api/config/grid</code>, but no scheduler reads them today.
+                  Changing them will not change the timetable the generator produces.
+                </Callout>
+
+                <div className="flex flex-col gap-3">
+                  {OPTIMIZATION_FLAGS.map((flag) => (
+                    <div key={flag.id} className="flex items-start gap-2.5">
+                      <Checkbox
+                        id={`flag-${flag.id}`}
+                        className="mt-0.5"
+                        checked={Boolean(flagDraft[flag.id])}
+                        onCheckedChange={(checked) =>
+                          setFlagDraft((current) => ({
+                            ...current,
+                            [flag.id]: checked === true,
+                          }))
+                        }
+                      />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <Label htmlFor={`flag-${flag.id}`} className="font-medium">
+                          {flag.label}
+                        </Label>
+                        <span className="text-xs text-muted-foreground">{flag.hint}</span>
+                        <span className="text-xs text-warning">{flag.enforcement}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
+          </div>
         )}
       </div>
     </AppShell>

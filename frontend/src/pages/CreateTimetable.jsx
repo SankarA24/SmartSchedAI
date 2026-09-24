@@ -16,8 +16,11 @@ import {
 
 import api from "@/lib/api";
 import { navForRole } from "@/lib/nav";
+import { cn } from "@/lib/utils";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -577,6 +580,19 @@ export default function CreateTimetable() {
     ? `${draft.department} · Year ${draft.year} · Semester ${draft.semester} · AY ${draft.academicYear}`
     : "No batch selected yet";
 
+  // The four step-1 selections, rendered as the read-back summary in the
+  // sidebar cell. Purely presentational — the draft itself is unchanged.
+  const batchRows = [
+    { label: "Academic year", value: draft.academicYear || "—" },
+    { label: "Department", value: draft.department || "—" },
+    { label: "Year", value: draft.year ? `Year ${draft.year}` : "—" },
+    { label: "Semester", value: draft.semester ? `Semester ${draft.semester}` : "—" },
+  ];
+
+  const readyCount = categories.filter((category) => category.status === "complete").length;
+  const readyPercent =
+    categories.length > 0 ? Math.round((readyCount / categories.length) * 100) : 0;
+
   return (
     <AppShell
       brand={shell.brand}
@@ -597,236 +613,341 @@ export default function CreateTimetable() {
         description="Pick the target batch, then check that every data category is ready before generating."
       />
 
-      <div className="flex flex-col gap-6">
+      <div className="space-y-5">
+        {/* ============ The spine: one step at a time ============ */}
         <SectionCard>
-          <Stepper steps={STEPS} current={step} completed={completedSteps} onStepClick={setStep} />
+          {/*
+            Horizontal on wide screens, vertical below `md` — six steps in a
+            row cannot stay legible at ~400px, and a horizontally scrolling
+            stepper hides the steps it pushes off-screen.
+          */}
+          <div className="hidden md:block">
+            <Stepper steps={STEPS} current={step} completed={completedSteps} onStepClick={setStep} />
+          </div>
+          <div className="md:hidden">
+            <Stepper
+              steps={STEPS}
+              current={step}
+              completed={completedSteps}
+              onStepClick={setStep}
+              orientation="vertical"
+            />
+          </div>
         </SectionCard>
 
-        {step === "basic" ? (
-          <SectionCard
-            title="Basic Info"
-            description="Options come from the courses already in the system."
-            icon={CalendarPlus}
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">
-                  Academic year
-                </label>
-                <Select
-                  value={draft.academicYear}
-                  onValueChange={(value) => setField("academicYear", value)}
+        {/* ============ The hubs, weighted by the active step ============ */}
+        {step !== "basic" ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            {loading
+              ? CATEGORY_IDS.map((id) => (
+                  <Skeleton
+                    key={id}
+                    className={cn(
+                      "h-44 w-full rounded-xl",
+                      id === step ? "md:col-span-2 xl:col-span-4" : "xl:col-span-2"
+                    )}
+                  />
+                ))
+              : categories.map((category) => (
+                  <CategoryCard
+                    key={category.id}
+                    icon={category.icon}
+                    title={category.title}
+                    description={category.description}
+                    status={category.status}
+                    items={category.items}
+                    onClick={() => openManagement(category.path)}
+                    className={cn(
+                      category.id === step
+                        ? "md:col-span-2 xl:col-span-4 border-primary/60 ring-1 ring-primary/20"
+                        : "xl:col-span-2"
+                    )}
+                  />
+                ))}
+          </div>
+        ) : null}
+
+        {/* ============ Detail cell + the batch / readiness rail ============ */}
+        <div className="grid gap-5 xl:grid-cols-12">
+          {step === "basic" ? (
+            <SectionCard
+              title="Basic Info"
+              description="Options come from the courses already in the system."
+              icon={CalendarPlus}
+              className="xl:col-span-8"
+              actions={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openManagement("/courses")}
                 >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select academic year" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {academicYearOptions.map((option) => (
-                      <SelectItem key={option} value={String(option)}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">Department</label>
-                <Select
-                  value={draft.department}
-                  onValueChange={(value) => setField("department", value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        departmentOptions.length > 0
-                          ? "Select department"
-                          : "No departments found"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departmentOptions.map((option) => (
-                      <SelectItem key={option} value={String(option)}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">Year</label>
-                <Select value={draft.year} onValueChange={(value) => setField("year", value)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select year" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {yearOptions.map((option) => (
-                      <SelectItem key={option} value={String(option)}>
-                        Year {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">Semester</label>
-                <Select
-                  value={draft.semester}
-                  onValueChange={(value) => setField("semester", value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select semester" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {semesterOptions.map((option) => (
-                      <SelectItem key={option} value={String(option)}>
-                        Semester {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3">
-              {error?.courses ? (
-                <Callout tone="destructive" title="Courses could not be loaded" icon={TriangleAlert}>
-                  {error.courses}. The selects below fall back to defaults until it loads.
-                </Callout>
-              ) : !loading && courses.length === 0 ? (
-                <Callout tone="warning" title="No courses found" icon={TriangleAlert}>
-                  Add courses first — department and academic year options are derived from them.
-                </Callout>
-              ) : (
-                <Callout tone="info" title="Target batch" icon={Info}>
-                  {selectionSummary}
-                </Callout>
-              )}
-
-              <div>
-                <Button type="button" variant="outline" onClick={() => openManagement("/courses")}>
                   <ExternalLink className="size-4" />
                   Manage courses
                 </Button>
-              </div>
-            </div>
-          </SectionCard>
-        ) : (
-          <div className="flex flex-col gap-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {categories.map((category) => (
-                <CategoryCard
-                  key={category.id}
-                  icon={category.icon}
-                  title={category.title}
-                  description={category.description}
-                  status={category.status}
-                  items={category.items}
-                  onClick={() => openManagement(category.path)}
-                  className={
-                    category.id === step ? "border-primary/50 ring-2 ring-ring/30" : undefined
-                  }
-                />
-              ))}
-            </div>
+              }
+            >
+              <div className="flex flex-col gap-5">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      Academic year
+                    </label>
+                    <Select
+                      value={draft.academicYear}
+                      onValueChange={(value) => setField("academicYear", value)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select academic year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {academicYearOptions.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-            {activeCategory ? (
-              <SectionCard
-                title={activeCategory.title}
-                description={activeCategory.description}
-                icon={activeCategory.icon}
-                actions={
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      Department
+                    </label>
+                    <Select
+                      value={draft.department}
+                      onValueChange={(value) => setField("department", value)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue
+                          placeholder={
+                            departmentOptions.length > 0
+                              ? "Select department"
+                              : "No departments found"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departmentOptions.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">Year</label>
+                    <Select value={draft.year} onValueChange={(value) => setField("year", value)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {yearOptions.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            Year {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      Semester
+                    </label>
+                    <Select
+                      value={draft.semester}
+                      onValueChange={(value) => setField("semester", value)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select semester" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {semesterOptions.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            Semester {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {error?.courses ? (
+                  <Callout
+                    tone="destructive"
+                    title="Courses could not be loaded"
+                    icon={TriangleAlert}
+                  >
+                    {error.courses}. The selects above fall back to defaults until it loads.
+                  </Callout>
+                ) : !loading && courses.length === 0 ? (
+                  <Callout tone="warning" title="No courses found" icon={TriangleAlert}>
+                    Add courses first — department and academic year options are derived from them.
+                  </Callout>
+                ) : null}
+              </div>
+            </SectionCard>
+          ) : activeCategory ? (
+            <SectionCard
+              title={activeCategory.title}
+              description={activeCategory.description}
+              icon={activeCategory.icon}
+              className="xl:col-span-8"
+              actions={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openManagement(activeCategory.path)}
+                >
+                  <ExternalLink className="size-4" />
+                  {activeCategory.manageLabel}
+                </Button>
+              }
+            >
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {activeCategory.items.map((item) => (
+                    <div key={item.label} className="rounded-lg bg-muted/60 px-3 py-2">
+                      <p className="text-xs text-muted-foreground">{item.label}</p>
+                      <p className="mt-0.5 truncate text-sm font-medium text-foreground">
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {loading ? (
+                  <Skeleton className="h-20 w-full rounded-lg" />
+                ) : activeCategory.issues.length > 0 ? (
+                  <Callout
+                    tone="warning"
+                    title={`${activeCategory.issues.length} item(s) need attention`}
+                    icon={TriangleAlert}
+                  >
+                    <ul className="list-disc space-y-1 pl-5">
+                      {activeCategory.issues.map((issue) => (
+                        <li key={issue}>{issue}</li>
+                      ))}
+                    </ul>
+                  </Callout>
+                ) : activeCategory.status === "pending" ? (
+                  <Callout tone="warning" title="Nothing here yet" icon={TriangleAlert}>
+                    No records match the selected batch. Open {activeCategory.title.toLowerCase()} to
+                    add them.
+                  </Callout>
+                ) : (
+                  <Callout tone="success" title="Ready" icon={CheckCircle2}>
+                    {activeCategory.title} looks complete for {selectionSummary}.
+                  </Callout>
+                )}
+              </div>
+            </SectionCard>
+          ) : null}
+
+          {/* ---- The rail: what is selected, and what is left to do ---- */}
+          <div className="flex flex-col gap-5 xl:col-span-4">
+            <SectionCard
+              title="Target batch"
+              description={basicComplete ? "Scoped for generation" : "Not selected yet"}
+              icon={CalendarPlus}
+              footer={
+                step !== "basic" ? (
+                  <div className="w-full pt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setStep("basic")}
+                    >
+                      Edit batch
+                    </Button>
+                  </div>
+                ) : null
+              }
+            >
+              <dl className="flex flex-col gap-2">
+                {batchRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-muted/60 px-3 py-2"
+                  >
+                    <dt className="text-xs text-muted-foreground">{row.label}</dt>
+                    <dd className="min-w-0 truncate text-sm font-medium text-foreground">
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </SectionCard>
+
+            <SectionCard
+              title="Ready to generate"
+              description={`${readyCount} of ${categories.length} categories complete`}
+              icon={Sparkles}
+              footer={
+                <div className="flex w-full flex-col gap-3 pt-4">
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={() => openManagement(activeCategory.path)}
+                    className="w-full"
+                    disabled={!canGenerate}
+                    onClick={goToGenerate}
                   >
-                    <ExternalLink className="size-4" />
-                    {activeCategory.manageLabel}
+                    <Sparkles className="size-4" />
+                    Generate Timetable
                   </Button>
-                }
-              >
-                <div className="flex flex-col gap-3">
-                  {activeCategory.issues.length > 0 ? (
-                    <Callout
-                      tone="warning"
-                      title={`${activeCategory.issues.length} item(s) need attention`}
-                      icon={TriangleAlert}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      disabled={stepIndex <= 0}
+                      onClick={() => setStep(STEP_IDS[Math.max(0, stepIndex - 1)])}
                     >
-                      <ul className="list-disc space-y-1 pl-5">
-                        {activeCategory.issues.map((issue) => (
-                          <li key={issue}>{issue}</li>
-                        ))}
-                      </ul>
-                    </Callout>
-                  ) : activeCategory.status === "pending" ? (
-                    <Callout tone="warning" title="Nothing here yet" icon={TriangleAlert}>
-                      No records match the selected batch. Open {activeCategory.title.toLowerCase()}{" "}
-                      to add them.
-                    </Callout>
-                  ) : (
-                    <Callout tone="success" title="Ready" icon={CheckCircle2}>
-                      {activeCategory.title} looks complete for {selectionSummary}.
-                    </Callout>
-                  )}
+                      Back
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      disabled={stepIndex >= STEP_IDS.length - 1}
+                      onClick={() => setStep(STEP_IDS[Math.min(STEP_IDS.length - 1, stepIndex + 1)])}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
-              </SectionCard>
-            ) : null}
-          </div>
-        )}
+              }
+            >
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Progress value={readyPercent} aria-label="Setup completeness" />
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {readyPercent}% · {selectionSummary}
+                  </p>
+                </div>
 
-        <SectionCard
-          title="Ready to generate"
-          description={selectionSummary}
-          icon={Sparkles}
-          footer={
-            <div className="flex w-full flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={stepIndex <= 0}
-                  onClick={() => setStep(STEP_IDS[Math.max(0, stepIndex - 1)])}
-                >
-                  Back
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={stepIndex >= STEP_IDS.length - 1}
-                  onClick={() =>
-                    setStep(STEP_IDS[Math.min(STEP_IDS.length - 1, stepIndex + 1)])
-                  }
-                >
-                  Next
-                </Button>
+                {canGenerate ? (
+                  <Callout tone="success" title="All categories are ready" icon={CheckCircle2}>
+                    {CATEGORY_IDS.length} categories checked. Generation runs on the next screen,
+                    where you pick the algorithm.
+                  </Callout>
+                ) : (
+                  <Callout tone="info" title="Finish setup to continue" icon={Info}>
+                    <ul className="list-disc space-y-1 pl-5">
+                      {blockers.map((blocker) => (
+                        <li key={blocker}>{blocker}</li>
+                      ))}
+                    </ul>
+                  </Callout>
+                )}
               </div>
-
-              <Button type="button" disabled={!canGenerate} onClick={goToGenerate}>
-                <Sparkles className="size-4" />
-                Generate Timetable
-              </Button>
-            </div>
-          }
-        >
-          {canGenerate ? (
-            <Callout tone="info" title="All categories are ready" icon={Info}>
-              {CATEGORY_IDS.length} categories checked against {selectionSummary}. Generation runs on
-              the next screen, where you pick the algorithm.
-            </Callout>
-          ) : (
-            <Callout tone="info" title="Finish setup to continue" icon={Info}>
-              <ul className="list-disc space-y-1 pl-5">
-                {blockers.map((blocker) => (
-                  <li key={blocker}>{blocker}</li>
-                ))}
-              </ul>
-            </Callout>
-          )}
-        </SectionCard>
+            </SectionCard>
+          </div>
+        </div>
       </div>
     </AppShell>
   );
