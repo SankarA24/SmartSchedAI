@@ -12,31 +12,39 @@ The application also includes **AI-assisted timetable generation** and an **AI c
 
 ### Admin Dashboard
 
-<img width="1878" height="922" alt="Admin Dashboard" src="https://github.com/user-attachments/assets/6e84e2ac-f10f-4896-a203-c8b110168886" />
+![Admin Dashboard](docs/screenshots/admin-dashboard.png)
 
-### Course Management
+### Timetable Generation
 
-<img width="1888" height="902" alt="Course Management" src="https://github.com/user-attachments/assets/564d1596-83ea-49f7-ac3a-ccbe5bb9c3be" />
-
-### Faculty Management
-
-<img width="1897" height="910" alt="Faculty Management" src="https://github.com/user-attachments/assets/afe3955a-f8c3-4843-bcb4-d7c34f7a4165" />
-
-### Room Management
-
-<img width="1918" height="908" alt="Room Management" src="https://github.com/user-attachments/assets/1e5d818d-4bcf-44af-b254-ca0fd8330e75" />
+![Timetable Generation](docs/screenshots/generate-timetable.png)
 
 ### Timetable Management
 
-<img width="1907" height="916" alt="Timetable Management" src="https://github.com/user-attachments/assets/be5e4200-8d7f-4d45-96b2-a14073f32989" />
+![Timetable Management](docs/screenshots/timetable-management.png)
+
+### Infrastructure & Policy
+
+![Infrastructure and Policy](docs/screenshots/infrastructure.png)
+
+### Course Management
+
+![Course Management](docs/screenshots/course-management.png)
+
+### Faculty Management
+
+![Faculty Management](docs/screenshots/faculty-management.png)
+
+### Room Management
+
+![Room Management](docs/screenshots/room-management.png)
 
 ### Faculty Portal
 
-<img width="1917" height="906" alt="Faculty Portal" src="https://github.com/user-attachments/assets/2baee206-6a8f-4a5c-8051-0eba748eb138" />
+![Faculty Portal](docs/screenshots/faculty-portal.png)
 
 ### Student Portal
 
-<img width="1905" height="897" alt="Student Portal" src="https://github.com/user-attachments/assets/2f71c22a-ff22-474b-a858-22c57de01878" />
+![Student Portal](docs/screenshots/student-portal.png)
 
 ---
 
